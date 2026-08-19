@@ -1,0 +1,19 @@
+name = "admin-site-api"
+main = "src/index.js"
+compatibility_date = "2024-01-01"
+
+# Never enable the workers.dev subdomain for this worker — it must only be
+# reachable via the Access-protected route below, not a public dev URL.
+workers_dev = false
+
+routes = [
+  { pattern = "admin.samarthvmurthy.dev/api/*", zone_name = "samarthvmurthy.dev" }
+]
+
+[vars]
+GITHUB_OWNER = "samarthvmurthy"
+GITHUB_REPO = "portfolio"
+GITHUB_FILE_PATH = "data.json"
+
+# Set the real secret with:
+#   npx wrangler secret put GITHUB_TOKEN

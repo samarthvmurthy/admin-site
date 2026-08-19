@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Portfolio Editor</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="shell">
+    <aside class="sidebar">
+        <div class="brand"><span class="symbol">&lt;/&gt;</span> Admin</div>
+        <div class="nav-section-label">Tools</div>
+        <nav>
+            <a href="../index.html">Dashboard</a>
+            <a href="portfolio.html" class="active">Portfolio Editor</a>
+        </nav>
+    </aside>
+
+    <div class="content">
+        <div class="topbar">
+            <h1>Portfolio Editor</h1>
+            <p>Edit data.json for samarthvmurthy/portfolio and push directly to GitHub.</p>
+        </div>
+        <main>
+            <p class="hint" id="load-hint">Loading data.json from samarthvmurthy/portfolio...</p>
+
+            <div id="app" style="display:none;">
+                <div class="panel">
+                    <h2>Site &amp; Hero</h2>
+                    <div id="site-fields"></div>
+                </div>
+
+                <div class="panel">
+                    <h2>About</h2>
+                    <div id="about-fields"></div>
+                </div>
+
+                <div class="panel">
+                    <h2>Projects on the page <span class="badge" id="curated-count-badge"></span></h2>
+                    <p class="hint">Each card below is one project currently in data.json. Edit its raw JSON to change description, language bars, or tech icons.</p>
+                    <div id="curated-projects"></div>
+                </div>
+
+                <div class="panel">
+                    <h2>Your GitHub repositories</h2>
+                    <p class="hint">Check a repo to add it to the site (auto-fills title/description/languages from GitHub). Uncheck to remove it. Fine-tune the result in the panel above.</p>
+                    <button class="btn-edit" id="fetch-repos">Fetch my repositories</button>
+                    <div class="repo-list" id="repo-list" style="margin-top:0.75rem;"></div>
+                </div>
+
+                <div class="panel">
+                    <h2>Journey</h2>
+                    <div id="journey-fields"></div>
+                </div>
+
+                <div class="panel">
+                    <h2>Contact</h2>
+                    <div id="contact-fields"></div>
+                </div>
+            </div>
+        </main>
+    </div>
+</div>
+
+<div class="push-bar" id="push-bar" style="display:none;">
+    <span class="dirty-indicator" id="dirty-indicator">No unsaved changes</span>
+    <input type="text" id="commit-message" placeholder="Commit message" value="Update data.json via admin tool">
+    <button class="btn-push" id="push-btn" disabled>Push to GitHub</button>
+</div>
+
+<script src="../js/portfolio.js"></script>
+</body>
+</html>
