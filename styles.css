@@ -30,6 +30,7 @@ body {
     display: flex;
     flex-direction: column;
     gap: 0.25rem;
+    min-height: 100vh;
 }
 .sidebar .brand {
     display: flex;
@@ -74,6 +75,19 @@ body {
     color: rgba(255,255,255,0.35);
     padding: 1rem 0.75rem 0.35rem;
 }
+.sidebar .logout {
+    margin-top: auto;
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 1rem 0.75rem 0.6rem;
+    border-radius: 8px;
+    color: var(--danger);
+    text-decoration: none;
+    font-size: 0.9rem;
+    border-top: 1px solid rgba(255,255,255,0.1);
+}
+.sidebar .logout:hover { background: rgba(229,72,77,0.12); }
 
 .content { flex: 1; min-width: 0; padding-bottom: 6rem; }
 
