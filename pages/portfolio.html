@@ -10,11 +10,69 @@
 <div class="shell">
     <aside class="sidebar">
         <div class="brand"><span class="symbol">&lt;/&gt;</span> Admin</div>
-        <div class="nav-section-label">Tools</div>
-        <nav>
-            <a href="../index.html">Dashboard</a>
-            <a href="portfolio.html" class="active">Portfolio Editor</a>
-        </nav>
+        <div class="sidebar-scroll">
+            <div class="nav-section-label">Explorer</div>
+            <ul class="tree">
+                <li class="tree-item">
+                    <a href="../index.html" class="tree-row">
+                        <span class="tree-toggle spacer">&#9656;</span>
+                        <span class="tree-icon">&#127968;</span>
+                        <span class="tree-label">Dashboard</span>
+                    </a>
+                </li>
+                <li class="tree-item" data-key="portfolio-editor">
+                    <div class="tree-row tree-folder">
+                        <span class="tree-toggle">&#9656;</span>
+                        <span class="tree-icon">&#128193;</span>
+                        <span class="tree-label">Portfolio Editor</span>
+                    </div>
+                    <ul class="tree-children">
+                        <li class="tree-item">
+                            <a href="portfolio.html" class="tree-row">
+                                <span class="tree-toggle spacer">&#9656;</span>
+                                <span class="tree-icon">&#128196;</span>
+                                <span class="tree-label">Overview</span>
+                            </a>
+                        </li>
+                        <li class="tree-item">
+                            <a href="portfolio.html#panel-site" class="tree-row">
+                                <span class="tree-toggle spacer">&#9656;</span>
+                                <span class="tree-icon">&#128196;</span>
+                                <span class="tree-label">Site &amp; Hero</span>
+                            </a>
+                        </li>
+                        <li class="tree-item">
+                            <a href="portfolio.html#panel-about" class="tree-row">
+                                <span class="tree-toggle spacer">&#9656;</span>
+                                <span class="tree-icon">&#128196;</span>
+                                <span class="tree-label">About</span>
+                            </a>
+                        </li>
+                        <li class="tree-item">
+                            <a href="portfolio.html#panel-projects" class="tree-row">
+                                <span class="tree-toggle spacer">&#9656;</span>
+                                <span class="tree-icon">&#128196;</span>
+                                <span class="tree-label">Projects</span>
+                            </a>
+                        </li>
+                        <li class="tree-item">
+                            <a href="portfolio.html#panel-journey" class="tree-row">
+                                <span class="tree-toggle spacer">&#9656;</span>
+                                <span class="tree-icon">&#128196;</span>
+                                <span class="tree-label">Journey</span>
+                            </a>
+                        </li>
+                        <li class="tree-item">
+                            <a href="portfolio.html#panel-contact" class="tree-row">
+                                <span class="tree-toggle spacer">&#9656;</span>
+                                <span class="tree-icon">&#128196;</span>
+                                <span class="tree-label">Contact</span>
+                            </a>
+                        </li>
+                    </ul>
+                </li>
+            </ul>
+        </div>
         <a href="/cdn-cgi/access/logout" class="logout">&#10140; Log out</a>
     </aside>
 
@@ -27,35 +85,32 @@
             <p class="hint" id="load-hint">Loading data.json from samarthvmurthy/portfolio...</p>
 
             <div id="app" style="display:none;">
-                <div class="panel">
+                <div class="panel" id="panel-site">
                     <h2>Site &amp; Hero</h2>
                     <div id="site-fields"></div>
                 </div>
 
-                <div class="panel">
+                <div class="panel" id="panel-about">
                     <h2>About</h2>
                     <div id="about-fields"></div>
                 </div>
 
-                <div class="panel">
+                <div class="panel" id="panel-projects">
                     <h2>Projects on the page <span class="badge" id="curated-count-badge"></span></h2>
                     <p class="hint">Each card below is one project currently in data.json. Edit its raw JSON to change description, language bars, or tech icons.</p>
                     <div id="curated-projects"></div>
-                </div>
-
-                <div class="panel">
-                    <h2>Your GitHub repositories</h2>
+                    <h3>Your GitHub repositories</h3>
                     <p class="hint">Check a repo to add it to the site (auto-fills title/description/languages from GitHub). Uncheck to remove it. Fine-tune the result in the panel above.</p>
                     <button class="btn-edit" id="fetch-repos">Fetch my repositories</button>
                     <div class="repo-list" id="repo-list" style="margin-top:0.75rem;"></div>
                 </div>
 
-                <div class="panel">
+                <div class="panel" id="panel-journey">
                     <h2>Journey</h2>
                     <div id="journey-fields"></div>
                 </div>
 
-                <div class="panel">
+                <div class="panel" id="panel-contact">
                     <h2>Contact</h2>
                     <div id="contact-fields"></div>
                 </div>
@@ -70,6 +125,7 @@
     <button class="btn-push" id="push-btn" disabled>Push to GitHub</button>
 </div>
 
+<script src="../js/sidebar.js"></script>
 <script src="../js/portfolio.js"></script>
 </body>
 </html>
