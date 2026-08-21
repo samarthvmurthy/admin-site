@@ -38,6 +38,31 @@
         if (bestMatch) bestMatch.classList.add('active');
     }
 
+    function initMobileDrawer() {
+        const sidebar = document.getElementById('sidebar');
+        const overlay = document.getElementById('sidebar-overlay');
+        const toggle = document.getElementById('menu-toggle');
+        if (!sidebar || !overlay || !toggle) return;
+
+        function open() {
+            sidebar.classList.add('open');
+            overlay.classList.add('visible');
+        }
+        function close() {
+            sidebar.classList.remove('open');
+            overlay.classList.remove('visible');
+        }
+
+        toggle.addEventListener('click', () => {
+            sidebar.classList.contains('open') ? close() : open();
+        });
+        overlay.addEventListener('click', close);
+        document.querySelectorAll('.tree-row[href]').forEach((row) => {
+            row.addEventListener('click', close);
+        });
+        window.addEventListener('hashchange', close);
+    }
+
     document.querySelectorAll('.tree-row[href]').forEach((row) => {
         row.addEventListener('click', () => {
             document.querySelectorAll('.tree-row').forEach((r) => r.classList.remove('active'));
@@ -50,4 +75,5 @@
     applyAutoState();
     initToggles();
     highlightActive();
+    initMobileDrawer();
 })();
