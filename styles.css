@@ -334,7 +334,7 @@ button {
 .repeater-item-row { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.4rem; }
 .repeater-item-row:last-child { margin-bottom: 0; }
 .repeater-item-row > select { flex-shrink: 0; width: auto; }
-.repeater-item-row > input:not(.chip-input-wide) { flex-shrink: 0; width: auto; }
+.repeater-item-row > input { flex-shrink: 0; }
 .repeater-item-row > textarea { flex: 1; }
 
 .chip-list { display: flex; flex-wrap: wrap; gap: 0.4rem; }
@@ -347,10 +347,10 @@ button {
     border-radius: 999px;
     padding: 0.25rem 0.4rem 0.25rem 0.7rem;
 }
-.chip-input { width: 6.5rem; border: none; background: transparent; padding: 0.15rem 0.2rem; }
-.chip-input:focus { background: var(--bg-alt); border-radius: 4px; }
-.chip-input-wide { width: 100%; }
-.chip-input-narrow { width: 5.5rem; flex-shrink: 0; }
+input.chip-input { width: 6.5rem; border: none; background: transparent; padding: 0.15rem 0.2rem; }
+input.chip-input:focus { background: var(--bg-alt); border-radius: 4px; }
+input.chip-input-wide { width: 100%; }
+input.chip-input-narrow { width: 5.5rem; flex-shrink: 0; }
 
 .checkbox-inline { display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.82rem; color: var(--text-dim); cursor: pointer; }
 .checkbox-inline input { width: auto; }
@@ -474,7 +474,7 @@ button {
 
     .project-row { padding: 1rem 0; }
     .repeater-item-row { flex-wrap: wrap; }
-    .chip-input-narrow { width: 100%; }
+    input.chip-input-narrow { width: 100%; }
 
     button { min-height: 2.15rem; }
 }
