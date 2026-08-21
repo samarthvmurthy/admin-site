@@ -101,14 +101,15 @@
                     <div id="about-fields"></div>
                 </div>
 
-                <div class="panel" id="panel-projects">
-                    <h2>Projects on the page <span class="badge" id="curated-count-badge"></span></h2>
-                    <p class="hint">Each card below is one project currently in data.json. Edit its raw JSON to change description, language bars, or tech icons.</p>
+                <div class="panel panel-wide" id="panel-projects">
+                    <h2>Projects <span class="badge" id="curated-count-badge"></span></h2>
+                    <p class="hint">Repositories load automatically. Check a repo to feature it on the site; fill in the fields on the right to control how it's presented.</p>
+                    <p class="hint" id="repo-load-hint"></p>
                     <div id="curated-projects"></div>
-                    <h3>Your GitHub repositories</h3>
-                    <p class="hint">Check a repo to add it to the site (auto-fills title/description/languages from GitHub). Uncheck to remove it. Fine-tune the result in the panel above.</p>
-                    <button class="btn-edit" id="fetch-repos">Fetch my repositories</button>
-                    <div class="repo-list" id="repo-list" style="margin-top:0.75rem;"></div>
+                    <div class="field-row">
+                        <div class="field-label">"See more" URL</div>
+                        <div class="field-value-plain" id="more-projects-url"></div>
+                    </div>
                 </div>
 
                 <div class="panel" id="panel-journey">
