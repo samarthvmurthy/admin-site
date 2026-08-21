@@ -305,13 +305,14 @@ button {
 }
 .btn-add:hover { border-color: var(--accent); background: rgba(59,111,237,0.06); }
 .btn-remove-icon {
-    background: transparent;
+    background: var(--bg-alt);
+    border: 1px solid var(--border);
     color: var(--text-dim);
     padding: 0.2rem 0.45rem;
     font-size: 0.75rem;
     flex-shrink: 0;
 }
-.btn-remove-icon:hover { color: var(--danger); }
+.btn-remove-icon:hover { color: var(--danger); border-color: var(--danger); background: rgba(229,72,77,0.06); }
 
 /* ---- Repeaters / subsections ---- */
 .subsection { margin-top: 1rem; padding-top: 0.9rem; border-top: 1px solid var(--border); }
@@ -327,15 +328,13 @@ button {
 .repeater-inline { display: flex; flex-direction: column; gap: 0.4rem; }
 .repeater-item {
     background: var(--bg);
-    border: 1px solid var(--border);
     border-radius: 8px;
     padding: 0.7rem 0.8rem;
 }
 .repeater-item-row { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.4rem; }
 .repeater-item-row:last-child { margin-bottom: 0; }
 .repeater-item-row > select { flex-shrink: 0; width: auto; }
-.repeater-item-row > input { flex-shrink: 0; }
-.repeater-item-row > textarea { flex: 1; }
+.repeater-item-row > textarea { flex: 1 1 auto; min-width: 0; }
 
 .chip-list { display: flex; flex-wrap: wrap; gap: 0.4rem; }
 .chip {
@@ -347,10 +346,11 @@ button {
     border-radius: 999px;
     padding: 0.25rem 0.4rem 0.25rem 0.7rem;
 }
-input.chip-input { width: 6.5rem; border: none; background: transparent; padding: 0.15rem 0.2rem; }
+input.chip-input { width: 7rem; flex-shrink: 0; border: none; background: transparent; padding: 0.15rem 0.3rem; }
 input.chip-input:focus { background: var(--bg-alt); border-radius: 4px; }
-input.chip-input-wide { width: 100%; }
-input.chip-input-narrow { width: 5.5rem; flex-shrink: 0; }
+input.chip-input-lg { width: 14rem; flex-shrink: 1; min-width: 0; }
+input.chip-input-wide { flex: 1 1 auto; min-width: 0; width: auto; }
+input.chip-input-narrow { width: 6.5rem; flex-shrink: 0; }
 
 .checkbox-inline { display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.82rem; color: var(--text-dim); cursor: pointer; }
 .checkbox-inline input { width: auto; }
@@ -374,9 +374,9 @@ input.chip-input-narrow { width: 5.5rem; flex-shrink: 0; }
     border-radius: 8px;
     padding: 0.75rem 0.85rem;
 }
-.github-module-name { font-weight: 600; font-size: 0.85rem; margin-bottom: 0.2rem; word-break: break-word; }
-.github-module-desc { font-size: 0.78rem; color: var(--text-dim); margin-bottom: 0.4rem; }
-.github-module-meta { font-size: 0.72rem; color: var(--text-dim); margin-bottom: 0.4rem; }
+.github-module-name { font-weight: 600; font-size: 0.85rem; margin-bottom: 0.2rem; overflow-wrap: break-word; }
+.github-module-desc { font-size: 0.78rem; color: var(--text-dim); margin-bottom: 0.4rem; overflow-wrap: break-word; }
+.github-module-meta { font-size: 0.72rem; color: var(--text-dim); margin-bottom: 0.4rem; overflow-wrap: break-word; }
 .github-module-link { display: inline-block; font-size: 0.78rem; color: var(--accent); text-decoration: none; margin-top: 0.3rem; }
 .github-module-link:hover { text-decoration: underline; }
 
@@ -385,7 +385,7 @@ input.chip-input-narrow { width: 5.5rem; flex-shrink: 0; }
 .lang-legend { display: flex; flex-wrap: wrap; gap: 0.4rem 0.6rem; margin-top: 0.4rem; }
 .lang-legend-item { font-size: 0.7rem; color: var(--text-dim); }
 
-.year-block { background: var(--bg-alt); }
+.year-block { background: var(--bg-alt); border: 1px solid var(--border); }
 .item-block { margin-top: 0.5rem; }
 .leaf-block { margin-top: 0.5rem; }
 

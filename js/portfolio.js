@@ -147,7 +147,7 @@ function renderSkillRows(host) {
             const chip = el('div', 'chip skill-chip');
             const iconInput = textInput(skill.icon, (v) => { skill.icon = v; });
             iconInput.placeholder = 'devicon-python-plain colored';
-            iconInput.className = 'chip-input chip-input-wide';
+            iconInput.className = 'chip-input-lg';
             const labelInput = textInput(skill.label, (v) => { skill.label = v; });
             labelInput.placeholder = 'Python';
             labelInput.className = 'chip-input';
