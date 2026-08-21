@@ -1,38 +1,17 @@
 (function () {
-    const STORAGE_KEY = 'admin_tree_state';
-
-    function loadState() {
-        try {
-            return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {};
-        } catch (e) {
-            return {};
-        }
+    function isPortfolioPage() {
+        return window.location.pathname.replace(/\/+$/, '').split('/').pop() === 'portfolio.html';
     }
 
-    function saveState(state) {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-    }
-
-    function applyExpandedState() {
-        const state = loadState();
-        document.querySelectorAll('.tree-item[data-key]').forEach((item) => {
-            const key = item.dataset.key;
-            const expanded = key in state ? state[key] : true;
-            item.classList.toggle('collapsed', !expanded);
-        });
+    function applyAutoState() {
+        const folder = document.querySelector('.tree-item[data-key="portfolio-editor"]');
+        if (folder) folder.classList.toggle('collapsed', !isPortfolioPage());
     }
 
     function initToggles() {
         document.querySelectorAll('.tree-folder').forEach((row) => {
             row.addEventListener('click', () => {
-                const item = row.closest('.tree-item');
-                const key = item.dataset.key;
-                const collapsed = item.classList.toggle('collapsed');
-                if (key) {
-                    const state = loadState();
-                    state[key] = !collapsed;
-                    saveState(state);
-                }
+                row.closest('.tree-item').classList.toggle('collapsed');
             });
         });
     }
@@ -68,7 +47,7 @@
 
     window.addEventListener('hashchange', highlightActive);
 
-    applyExpandedState();
+    applyAutoState();
     initToggles();
     highlightActive();
 })();
