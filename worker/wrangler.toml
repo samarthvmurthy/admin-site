@@ -15,5 +15,15 @@ GITHUB_OWNER = "samarthvmurthy"
 GITHUB_REPO = "portfolio"
 GITHUB_FILE_PATH = "data.json"
 
-# Set the real secret with:
-#   npx wrangler secret put GITHUB_TOKEN
+# Project workspaces (next steps, notes, design thinking, custom projects).
+# Create the namespace once, then paste its id here:
+#   npx wrangler kv namespace create WORKSPACE
+[[kv_namespaces]]
+binding = "WORKSPACE"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"
+
+# Secrets — set each one with `npx wrangler secret put <NAME>`:
+#   GITHUB_TOKEN           repo-scoped personal access token
+#   GOOGLE_CLIENT_ID       OAuth client id      (see scripts/google-auth.mjs)
+#   GOOGLE_CLIENT_SECRET   OAuth client secret  (see scripts/google-auth.mjs)
+#   GOOGLE_REFRESH_TOKEN   printed by `node scripts/google-auth.mjs`

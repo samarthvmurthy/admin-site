@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Calendar</title>
+<link rel="icon" type="image/svg+xml" href="../assets/icon.svg">
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="shell">
+    <aside class="sidebar" id="sidebar"></aside>
+    <div class="sidebar-overlay" id="sidebar-overlay"></div>
+
+    <div class="content">
+        <div class="topbar">
+            <button class="menu-toggle" id="menu-toggle" aria-label="Open menu">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+            </button>
+            <div>
+                <h1>Calendar</h1>
+                <p>Your Google Calendar, editable from here.</p>
+            </div>
+            <div class="topbar-actions">
+                <button class="btn btn-add-primary btn-small" id="new-event-btn" disabled>+ New event</button>
+            </div>
+        </div>
+
+        <main>
+            <!-- Shown until the Google secrets are set on the worker -->
+            <section class="panel" id="setup-panel" style="display:none;">
+                <h2>Connect Google Calendar</h2>
+                <p class="hint">The worker has no Google credentials yet. This is a one-time setup.</p>
+                <ol class="setup-steps">
+                    <li>In <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener">Google Cloud Console</a>, enable the <strong>Google Calendar API</strong>.</li>
+                    <li>Create an <strong>OAuth client ID</strong> of type <em>Web application</em>, with redirect URI <code>http://localhost:8976/callback</code>.</li>
+                    <li>Run the helper script from the repo root:<br><code>GOOGLE_CLIENT_ID=… GOOGLE_CLIENT_SECRET=… node worker/scripts/google-auth.mjs</code></li>
+                    <li>Approve access in the browser; the script prints a refresh token.</li>
+                    <li>Store all three on the worker:<br>
+                        <code>npx wrangler secret put GOOGLE_CLIENT_ID</code><br>
+                        <code>npx wrangler secret put GOOGLE_CLIENT_SECRET</code><br>
+                        <code>npx wrangler secret put GOOGLE_REFRESH_TOKEN</code></li>
+                    <li>Redeploy: <code>npx wrangler deploy</code>, then reload this page.</li>
+                </ol>
+            </section>
+
+            <div id="app" style="display:none;">
+                <div class="toolbar">
+                    <select id="calendar-picker" class="select-plain toolbar-select"></select>
+                    <div class="range-nav">
+                        <button class="btn btn-edit btn-small" id="range-prev" aria-label="Previous">←</button>
+                        <button class="btn btn-edit btn-small" id="range-today">Today</button>
+                        <button class="btn btn-edit btn-small" id="range-next" aria-label="Next">→</button>
+                    </div>
+                    <div class="filter-chips" id="range-chips"></div>
+                    <span class="range-label" id="range-label"></span>
+                </div>
+
+                <section class="panel panel-wide">
+                    <div class="panel-head">
+                        <h2 id="agenda-title">Agenda</h2>
+                        <span class="panel-head-note" id="event-count-note"></span>
+                    </div>
+                    <p class="hint" id="agenda-hint">Loading events…</p>
+                    <div id="agenda"></div>
+                </section>
+            </div>
+        </main>
+    </div>
+</div>
+
+<div class="modal-backdrop" id="modal-backdrop"></div>
+
+<script src="../js/nav.js"></script>
+<script src="../js/common.js"></script>
+<script src="../js/modal.js"></script>
+<script src="../js/calendar.js"></script>
+</body>
+</html>
