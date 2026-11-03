@@ -179,6 +179,7 @@
     A.store = {
         plan: createDoc('plan', '/plan'),
         habits: createDoc('habits', '/habits'),
+        review: createDoc('review', '/review'),
         workspace,
         on: (fn) => { listeners.add(fn); return () => listeners.delete(fn); },
         indicator,

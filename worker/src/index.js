@@ -207,6 +207,7 @@ async function handleGetRepoDetail(env, url) {
 // Key layout (one JSON document per key):
 //   plan              tasks + roadmaps
 //   habits            habit list with a per-day log
+//   review            which calendar events you let into Up next
 //   projects:custom   hand-added projects
 //   ws:<projectId>    a project's workspace (next steps, achieved, notes)
 //   cal:cp-id         id of the "Control Panel" Google calendar
@@ -215,6 +216,7 @@ const WS_PREFIX = 'ws:';
 const CUSTOM_KEY = 'projects:custom';
 const PLAN_KEY = 'plan';
 const HABITS_KEY = 'habits';
+const REVIEW_KEY = 'review';
 const CP_CAL_KEY = 'cal:cp-id';
 const CP_CAL_NAME = 'Control Panel';
 const SITE_URL = 'https://admin.samarthvmurthy.dev';
@@ -340,6 +342,46 @@ async function handlePutHabits(env, request) {
     updatedAt: nowIso(),
   };
   await writeJson(env, HABITS_KEY, doc);
+  return json(doc);
+}
+
+// ---------------------------------------------------------------- review ----
+//
+// Calendar events don't go into Up next until you've said so. Decisions are
+// kept per event, per repeating series and per calendar:
+//   { events:    { '<calId>|<eventId>':     { decision, date } },
+//     series:    { '<calId>|<recurringId>': 'accept' | 'dismiss' },
+//     calendars: { '<calId>':               'accept' | 'dismiss' } }
+
+const DECISIONS = new Set(['accept', 'dismiss']);
+
+function emptyReview() {
+  return { events: {}, series: {}, calendars: {}, updatedAt: null };
+}
+
+function cleanMap(obj, valueOk) {
+  const out = {};
+  if (obj && typeof obj === 'object' && !Array.isArray(obj)) {
+    for (const [k, v] of Object.entries(obj)) if (typeof k === 'string' && k.length < 600 && valueOk(v)) out[k] = v;
+  }
+  return out;
+}
+
+async function handleGetReview(env) {
+  return json({ ...emptyReview(), ...((await readJson(env, REVIEW_KEY)) || {}) });
+}
+
+async function handlePutReview(env, request) {
+  const body = await request.json();
+  // Per-event decisions only matter until the event is over; drop old ones.
+  const cutoff = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+  const doc = {
+    events: cleanMap(body.events, (v) => v && DECISIONS.has(v.decision) && typeof v.date === 'string' && v.date >= cutoff),
+    series: cleanMap(body.series, (v) => DECISIONS.has(v)),
+    calendars: cleanMap(body.calendars, (v) => DECISIONS.has(v)),
+    updatedAt: nowIso(),
+  };
+  await writeJson(env, REVIEW_KEY, doc);
   return json(doc);
 }
 
@@ -485,6 +527,7 @@ async function handleExport(env) {
     exportedAt: nowIso(),
     plan: (await readJson(env, PLAN_KEY)) || null,
     habits: (await readJson(env, HABITS_KEY)) || null,
+    review: (await readJson(env, REVIEW_KEY)) || null,
     customProjects: await readCustomProjects(env),
     workspaces: await listWorkspaces(env),
   });
@@ -495,6 +538,7 @@ async function handleImport(env, request) {
   let written = 0;
   if (body.plan && typeof body.plan === 'object') { await writeJson(env, PLAN_KEY, body.plan); written++; }
   if (body.habits && typeof body.habits === 'object') { await writeJson(env, HABITS_KEY, body.habits); written++; }
+  if (body.review && typeof body.review === 'object') { await writeJson(env, REVIEW_KEY, body.review); written++; }
   if (Array.isArray(body.customProjects)) { await writeJson(env, CUSTOM_KEY, body.customProjects); written++; }
   for (const [id, doc] of Object.entries(body.workspaces || {})) {
     if (!doc) continue;
@@ -1015,6 +1059,8 @@ const ROUTES = [
   ['PUT',    '/api/plan',               (c) => handlePutPlan(c.env, c.request)],
   ['GET',    '/api/habits',             (c) => handleGetHabits(c.env)],
   ['PUT',    '/api/habits',             (c) => handlePutHabits(c.env, c.request)],
+  ['GET',    '/api/review',             (c) => handleGetReview(c.env)],
+  ['PUT',    '/api/review',             (c) => handlePutReview(c.env, c.request)],
   ['GET',    '/api/workspace',          (c) => handleGetWorkspace(c.env, c.url)],
   ['PUT',    '/api/workspace',          (c) => handlePutWorkspace(c.env, c.request, c.url)],
   ['GET',    '/api/workspaces',         (c) => handleGetAllWorkspaces(c.env)],

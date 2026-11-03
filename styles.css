@@ -1402,3 +1402,26 @@ body > .toast { position: fixed; top: 1rem; right: 1rem; z-index: 999; }
 /* Anchored sections shouldn't hide under the sticky top bar. */
 [id^="panel-"], [id^="sec-"], [id^="group-"], [id^="phase-"], #habits { scroll-margin-top: 5.5rem; }
 .ptile-meta .inline-link { font-size: inherit; font-weight: 600; }
+
+/* ---- Up next: calendar review ---- */
+.badge-accent { background: var(--accent-soft) !important; color: var(--accent) !important; }
+.review-row { align-items: flex-start; }
+.review-row .kind-icon { margin-top: 0.2rem; }
+.review-actions { display: flex; gap: 0.35rem; flex-shrink: 0; align-items: center; }
+.review-series { display: flex; flex-wrap: wrap; gap: 0.3rem; align-items: center; font-size: 0.72rem; color: var(--text-faint); margin-top: 0.15rem; }
+.link-btn { background: transparent; padding: 0; min-height: 0; font-size: inherit; font-weight: 600; color: var(--accent); border-radius: 3px; }
+.link-btn:hover { text-decoration: underline; }
+.review-toggle { font-size: 0.78rem; margin-top: 0.6rem; color: var(--text-dim); }
+.review-skipped { opacity: 0.75; }
+.review-nudge {
+    display: flex; align-items: center; gap: 0.5rem;
+    padding: 0.5rem 0.7rem; border-radius: var(--radius-sm);
+    background: var(--accent-soft); color: var(--accent);
+    font-size: 0.82rem; font-weight: 600; text-decoration: none;
+}
+.review-nudge span { flex: 1; }
+.review-nudge:hover { filter: brightness(1.05); }
+@media (max-width: 760px) {
+    .review-row { flex-wrap: wrap; }
+    .review-actions { width: 100%; justify-content: flex-end; }
+}

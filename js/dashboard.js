@@ -33,6 +33,7 @@
             workspaces: state.workspaces,
             projectNames: projectNames(),
             events: state.events,
+            reviewDoc: A.store.review.doc,
         });
     }
 
@@ -54,6 +55,15 @@
         const today = groups.find((g) => g.key === 'today').items.length;
         document.getElementById('upnext-sub').textContent =
             [overdue ? `${overdue} overdue` : '', `${today} today`].filter(Boolean).join(' · ');
+
+        const pending = state.calendar.configured ? A.items.reviewQueue(state.events, A.store.review.doc).pending.length : 0;
+        if (pending) {
+            const nudge = A.link('', 'pages/upnext.html#review-panel', 'review-nudge');
+            nudge.appendChild(A.icon('inbox', 14));
+            nudge.appendChild(A.el('span', null, `${pending} calendar event${pending === 1 ? '' : 's'} to review`));
+            nudge.appendChild(A.icon('chevronRight', 14));
+            host.appendChild(nudge);
+        }
 
         const list = A.items.top(items, 7);
         if (!list.length) {
@@ -364,6 +374,7 @@
             A.api('/workspaces').catch(() => ({})),
             A.api('/projects').catch(() => []),
             A.items.fetchEvents(8),
+            A.store.review.load().catch(() => A.store.review.seed({ events: {}, series: {}, calendars: {} })),
         ]);
 
         state.plan = plan || { tasks: [], roadmaps: [] };

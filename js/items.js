@@ -40,7 +40,68 @@
         };
     }
 
-    function collect({ plan, workspaces, projectNames = {}, events = [] }) {
+    // ------------------------------------------------------------ review --
+    //
+    // Calendar events wait for review before they count in Up next. A
+    // decision can be made for one event, a repeating series, or a whole
+    // calendar; the most specific one wins.
+
+    const review = {
+        key: (e) => `${e.calendarId}|${e.id}`,
+        seriesKey: (e) => (e.recurringEventId ? `${e.calendarId}|${e.recurringEventId}` : null),
+
+        decision(doc, e) {
+            if (!doc) return 'pending';
+            const ev = doc.events?.[review.key(e)];
+            if (ev) return ev.decision;
+            const sk = review.seriesKey(e);
+            if (sk && doc.series?.[sk]) return doc.series[sk];
+            return doc.calendars?.[e.calendarId] || 'pending';
+        },
+
+        // scope: 'event' | 'series' | 'calendar'; decision null clears it.
+        set(doc, e, decision, scope = 'event') {
+            doc.events = doc.events || {};
+            doc.series = doc.series || {};
+            doc.calendars = doc.calendars || {};
+            if (scope === 'series' && review.seriesKey(e)) {
+                const sk = review.seriesKey(e);
+                if (decision) doc.series[sk] = decision; else delete doc.series[sk];
+                // A series-wide call overrides one-off calls on its instances.
+                Object.keys(doc.events).forEach((k) => { if (k.startsWith(`${e.calendarId}|${e.recurringEventId}_`)) delete doc.events[k]; });
+            } else if (scope === 'calendar') {
+                if (decision) doc.calendars[e.calendarId] = decision; else delete doc.calendars[e.calendarId];
+            } else if (decision) {
+                doc.events[review.key(e)] = { decision, date: A.dateKey(A.parseDate(e.start)) };
+            } else {
+                delete doc.events[review.key(e)];
+            }
+        },
+    };
+
+    // Events worth reviewing at all: not mirrors of our own items, not over.
+    function candidates(events) {
+        const today = A.todayKey();
+        return (events || [])
+            .filter((e) => !(e.controlPanel || e.cpKind))
+            .map((e) => ({ event: e, item: eventItem(e, today) }))
+            .filter((c) => c.item);
+    }
+
+    function reviewQueue(events, doc) {
+        const out = { pending: [], dismissed: [] };
+        candidates(events).forEach((c) => {
+            const d = review.decision(doc, c.event);
+            if (d === 'pending') out.pending.push(c);
+            else if (d === 'dismiss') out.dismissed.push(c);
+        });
+        const byStart = (a, b) => A.parseDate(a.event.start) - A.parseDate(b.event.start);
+        out.pending.sort(byStart);
+        out.dismissed.sort(byStart);
+        return out;
+    }
+
+    function collect({ plan, workspaces, projectNames = {}, events = [], reviewDoc = null }) {
         const today = A.todayKey();
         const out = [];
 
@@ -86,10 +147,9 @@
             });
         });
 
-        events.forEach((e) => {
-            if (e.controlPanel || e.cpKind) return; // mirrors of the items above
-            const item = eventItem(e, today);
-            if (item) out.push(item);
+        // Only events you've let in (mirrors of the items above never count).
+        candidates(events).forEach(({ event, item }) => {
+            if (review.decision(reviewDoc, event) === 'accept') out.push({ ...item, event });
         });
 
         return out;
@@ -228,7 +288,7 @@
 
     const COMPLETABLE = new Set(['task', 'step', 'milestone']);
 
-    function row(item, { onComplete, showKind = true } = {}) {
+    function row(item, { onComplete, onRemoveEvent, showKind = true } = {}) {
         const r = A.el('div', 'item-row');
 
         if (COMPLETABLE.has(item.kind)) {
@@ -269,9 +329,14 @@
             if (item.kind === 'event' && !item.time) chip.textContent = `${A.dueLabel(item.due)} · all day`;
             meta.appendChild(chip);
         }
+        if (item.kind === 'event' && onRemoveEvent) {
+            const actions = A.el('div', 'item-actions');
+            actions.appendChild(A.iconButton('x', 'Remove from Up next', () => onRemoveEvent(item), 'icon-btn sm danger'));
+            meta.appendChild(actions);
+        }
         r.appendChild(meta);
         return r;
     }
 
-    A.items = { KIND_LABEL, BUCKETS, collect, group, top, fetchEvents, complete, completeStep, reopenStep, row };
+    A.items = { KIND_LABEL, BUCKETS, collect, group, top, fetchEvents, complete, completeStep, reopenStep, row, review, reviewQueue };
 })();
