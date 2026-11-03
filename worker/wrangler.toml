@@ -16,11 +16,11 @@ GITHUB_REPO = "portfolio"
 GITHUB_FILE_PATH = "data.json"
 
 # Project workspaces (next steps, notes, design thinking, custom projects).
-# Create the namespace once, then paste its id here:
+# Created 2026-11-03 with:
 #   npx wrangler kv namespace create WORKSPACE
 [[kv_namespaces]]
 binding = "WORKSPACE"
-id = "REPLACE_WITH_KV_NAMESPACE_ID"
+id = "b74cfaa1ca5f4a18b046b818107f9505"
 
 # Secrets — set each one with `npx wrangler secret put <NAME>`:
 #   GITHUB_TOKEN           repo-scoped personal access token
