@@ -1,315 +1,292 @@
 /**
- * Dashboard: an "up next" strip (calendar + next steps), the tool cards, and a
- * unified project grid combining every GitHub repo with hand-added projects.
+ * Dashboard: one tile per module, each a live summary that links through,
+ * plus the habit tracker across the bottom.
  */
 (function () {
     const A = window.Admin;
 
-    const STATUS_LABELS = { idea: 'Idea', active: 'Active', paused: 'Paused', shipped: 'Shipped' };
-    const PRIMARY_FILTERS = [
-        { key: 'all', label: 'All' },
-        { key: 'active', label: 'Active' },
-        { key: 'shipped', label: 'Shipped' },
-        { key: 'paused', label: 'Paused' },
-        { key: 'untracked', label: 'Untracked' },
-    ];
-
     const state = {
-        repos: [],
-        custom: [],
+        plan: null,
         workspaces: {},
-        projects: [],
-        filter: 'all',
-        includeForks: false,
-        includeArchived: false,
-        search: '',
-        sort: 'pushed',
+        custom: [],
+        repos: null,
+        events: [],
+        calendar: { configured: null },
     };
 
-    // ------------------------------------------------------------ modelling --
+    document.querySelectorAll('[data-icon]').forEach((n) => { n.innerHTML = window.Nav.svg(n.dataset.icon, 17); });
+    document.getElementById('greeting').textContent = A.greeting();
+    document.getElementById('today-line').textContent = new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
 
-    function openSteps(ws) {
-        return (ws?.tasks || []).filter((t) => t.lane === 'next' || t.lane === 'doing').length;
+    // ------------------------------------------------------------- helpers --
+
+    function projectNames() {
+        const names = {};
+        state.custom.forEach((p) => { names[p.id] = p.name; });
+        (state.repos || []).forEach((r) => { names[`gh:${r.full_name}`] = r.name; });
+        return names;
     }
 
-    function buildProjects() {
-        const fromRepos = state.repos.map((r) => ({
-            id: `gh:${r.full_name}`,
-            name: r.name,
-            description: r.description || '',
-            kind: 'repo',
-            repo: r.full_name,
-            liveUrl: r.homepage || '',
-            pushedAt: r.pushed_at,
-            language: r.language,
-            private: r.private,
-            fork: r.fork,
-            archived: r.archived,
-            stars: r.stargazers_count,
-            openIssues: r.open_issues_count,
-            htmlUrl: r.html_url,
-            topics: r.topics || [],
-        }));
-
-        const fromCustom = state.custom.map((p) => ({
-            id: p.id,
-            name: p.name,
-            description: p.description || '',
-            kind: p.kind === 'program' ? 'program' : 'custom',
-            repo: p.repo || '',
-            liveUrl: p.liveUrl || '',
-            pushedAt: p.createdAt,
-            language: null,
-            private: true,
-            fork: false,
-            archived: false,
-            stars: 0,
-            openIssues: 0,
-            htmlUrl: p.repo ? `https://github.com/${p.repo}` : '',
-            topics: [],
-        }));
-
-        state.projects = [...fromCustom, ...fromRepos].map((p) => {
-            const ws = state.workspaces[p.id] || null;
-            return {
-                ...p,
-                ws,
-                // A workspace's own liveUrl wins — it's the one you curated.
-                liveUrl: ws?.liveUrl || p.liveUrl,
-                status: ws?.status || null,
-                openSteps: openSteps(ws),
-                touchedAt: ws?.updatedAt || null,
-            };
+    function allItems() {
+        return A.items.collect({
+            plan: state.plan,
+            workspaces: state.workspaces,
+            projectNames: projectNames(),
+            events: state.events,
         });
     }
 
-    function visibleProjects() {
-        const q = state.search.toLowerCase();
-        let list = state.projects.filter((p) => {
-            if (!state.includeForks && p.fork) return false;
-            if (!state.includeArchived && p.archived) return false;
-            if (state.filter === 'untracked' && p.ws) return false;
-            if (state.filter !== 'all' && state.filter !== 'untracked' && p.status !== state.filter) return false;
-            if (!q) return true;
-            return [p.name, p.description, p.repo, (p.topics || []).join(' ')]
-                .join(' ').toLowerCase().includes(q);
-        });
-
-        const byName = (a, b) => a.name.localeCompare(b.name);
-        const sorters = {
-            name: byName,
-            pushed: (a, b) => new Date(b.pushedAt || 0) - new Date(a.pushedAt || 0),
-            touched: (a, b) => new Date(b.touchedAt || 0) - new Date(a.touchedAt || 0),
-            tasks: (a, b) => b.openSteps - a.openSteps || byName(a, b),
-        };
-        return list.sort(sorters[state.sort] || sorters.pushed);
+    function stat(value, label, tone, href) {
+        const s = A.el(href ? 'a' : 'div', `stat${tone ? ' ' + tone : ''}`);
+        if (href) s.href = A.pageHref(href);
+        s.appendChild(A.el('div', 'stat-value', String(value)));
+        s.appendChild(A.el('div', 'stat-label', label));
+        return s;
     }
 
-    // ------------------------------------------------------------ rendering --
+    // ------------------------------------------------------------ up next --
 
-    function statusPill(status) {
-        const pill = A.el('span', `pill pill-${status || 'none'}`, STATUS_LABELS[status] || 'No workspace');
-        return pill;
-    }
+    function renderUpNext() {
+        const host = A.clear(document.getElementById('upnext-body'));
+        const items = allItems();
+        const groups = A.items.group(items);
+        const overdue = groups.find((g) => g.key === 'overdue').items.length;
+        const today = groups.find((g) => g.key === 'today').items.length;
+        document.getElementById('upnext-sub').textContent =
+            [overdue ? `${overdue} overdue` : '', `${today} today`].filter(Boolean).join(' · ');
 
-    function projectCard(p) {
-        const card = A.el('a', 'project-card');
-        card.href = A.projectHref(p.id);
-
-        const head = A.el('div', 'project-card-head');
-        const title = A.el('div', 'project-card-title', p.name);
-        head.appendChild(title);
-        head.appendChild(statusPill(p.status));
-        card.appendChild(head);
-
-        const tags = A.el('div', 'project-card-tags');
-        if (p.kind === 'program') tags.appendChild(A.el('span', 'tag tag-program', 'Program'));
-        else if (p.kind === 'custom') tags.appendChild(A.el('span', 'tag', 'Manual'));
-        if (p.private && p.kind === 'repo') tags.appendChild(A.el('span', 'tag', 'Private'));
-        if (p.fork) tags.appendChild(A.el('span', 'tag', 'Fork'));
-        if (p.archived) tags.appendChild(A.el('span', 'tag', 'Archived'));
-        if (tags.children.length) card.appendChild(tags);
-
-        card.appendChild(A.el('p', 'project-card-desc', p.description || 'No description.'));
-
-        // Milestone progress makes multi-week programs readable at a glance.
-        const milestones = p.ws?.milestones || [];
-        if (milestones.length) {
-            const done = milestones.filter((m) => m.done).length;
-            const wrap = A.el('div', 'progress-wrap');
-            const bar = A.el('div', 'progress-track');
-            const fill = A.el('div', 'progress-fill');
-            fill.style.width = `${(done / milestones.length) * 100}%`;
-            bar.appendChild(fill);
-            wrap.appendChild(bar);
-            wrap.appendChild(A.el('span', 'progress-label', `${done}/${milestones.length}`));
-            card.appendChild(wrap);
-        }
-
-        const meta = A.el('div', 'project-card-meta');
-        if (p.language) {
-            const lang = A.el('span', 'meta-item');
-            const dot = A.el('span', 'lang-dot');
-            dot.style.background = A.langColor(p.language);
-            lang.appendChild(dot);
-            lang.appendChild(A.el('span', null, p.language));
-            meta.appendChild(lang);
-        }
-        if (p.openSteps) meta.appendChild(A.el('span', 'meta-item meta-accent', `${p.openSteps} open step${p.openSteps === 1 ? '' : 's'}`));
-        if (p.openIssues) meta.appendChild(A.el('span', 'meta-item', `${p.openIssues} issue${p.openIssues === 1 ? '' : 's'}`));
-        if (p.pushedAt && p.kind === 'repo') meta.appendChild(A.el('span', 'meta-item', `pushed ${A.relativeTime(p.pushedAt)}`));
-        if (p.liveUrl) meta.appendChild(A.el('span', 'meta-item meta-live', 'live'));
-        card.appendChild(meta);
-
-        return card;
-    }
-
-    function renderGrid() {
-        const grid = A.clear(document.getElementById('project-grid'));
-        const list = visibleProjects();
-
-        document.getElementById('project-count-badge').textContent = `${list.length}`;
-        const hint = document.getElementById('projects-hint');
-
+        const list = A.items.top(items, 7);
         if (!list.length) {
-            hint.textContent = state.search
-                ? `Nothing matches "${state.search}".`
-                : 'No projects match these filters.';
+            const empty = A.el('div', 'empty-state');
+            empty.appendChild(A.el('strong', null, 'All clear'));
+            empty.appendChild(document.createTextNode('Nothing due. Add tasks in Plan or next steps on a project.'));
+            host.appendChild(empty);
             return;
         }
-        hint.textContent = `${state.projects.length} total — ${state.repos.length} from GitHub, ${state.custom.length} added by hand.`;
-        list.forEach((p) => grid.appendChild(projectCard(p)));
+        const rows = A.el('div', 'row-list');
+        list.forEach((item) => rows.appendChild(A.items.row(item, { onComplete: refreshDerived })));
+        host.appendChild(rows);
+
+        const remaining = items.length - list.length;
+        if (remaining > 0) {
+            const more = A.link(`${remaining} more in Up next →`, 'pages/upnext.html', 'inline-link');
+            host.appendChild(more);
+        }
     }
 
-    function renderFilters() {
-        const host = A.clear(document.getElementById('project-filters'));
+    // ----------------------------------------------------------- calendar --
 
-        PRIMARY_FILTERS.forEach((f) => {
-            const chip = A.button(f.label, `filter-chip${state.filter === f.key ? ' on' : ''}`, () => {
-                state.filter = f.key;
-                renderFilters();
-                renderGrid();
-            });
-            host.appendChild(chip);
-        });
+    function renderCalendar() {
+        const host = A.clear(document.getElementById('calendar-body'));
+        const sub = document.getElementById('calendar-sub');
 
-        host.appendChild(A.el('span', 'filter-divider'));
-
-        const toggles = [
-            ['includeForks', 'Forks'],
-            ['includeArchived', 'Archived'],
-        ];
-        toggles.forEach(([key, label]) => {
-            host.appendChild(A.button(label, `filter-chip filter-toggle${state[key] ? ' on' : ''}`, () => {
-                state[key] = !state[key];
-                renderFilters();
-                renderGrid();
-            }));
-        });
-    }
-
-    // ------------------------------------------------------------- up next ---
-
-    function renderUpNextTasks() {
-        const host = A.clear(document.getElementById('upnext-tasks'));
-        const rows = [];
-        state.projects.forEach((p) => {
-            (p.ws?.tasks || [])
-                .filter((t) => t.lane === 'next' || t.lane === 'doing')
-                .forEach((t) => rows.push({ project: p, task: t }));
-        });
-
-        if (!rows.length) {
-            host.appendChild(A.el('p', 'hint', 'No next steps written down yet. Open a project and add some.'));
+        if (state.calendar.configured === null) { sub.textContent = 'Loading…'; return; }
+        if (!state.calendar.configured) {
+            sub.textContent = 'Not connected';
+            const box = A.el('div', 'coming-soon');
+            box.appendChild(A.el('strong', null, 'Connect Google Calendar'));
+            box.appendChild(document.createTextNode('Your events, plus every dated task and milestone, will show up here.'));
+            box.appendChild(A.link('Set it up →', 'pages/calendar.html', 'inline-link'));
+            host.appendChild(box);
             return;
         }
 
-        // Things already in progress belong at the top of the list.
-        rows.sort((a, b) => (a.task.lane === 'doing' ? -1 : 0) - (b.task.lane === 'doing' ? -1 : 0));
+        const today = A.todayKey();
+        const now = new Date();
+        const todays = state.events
+            .filter((e) => {
+                const startKey = A.dateKey(A.parseDate(e.start));
+                const endKey = e.allDay ? A.addDays(A.dateKey(A.parseDate(e.end)), -1) : startKey;
+                return startKey <= today && endKey >= today;
+            })
+            .sort((a, b) => (a.allDay === b.allDay ? A.parseDate(a.start) - A.parseDate(b.start) : a.allDay ? -1 : 1));
 
-        const list = A.el('div', 'upnext-list');
-        rows.slice(0, 8).forEach(({ project, task }) => {
-            const row = A.el('a', 'upnext-item');
-            row.href = A.projectHref(project.id);
-            if (task.lane === 'doing') row.appendChild(A.el('span', 'pill pill-doing', 'doing'));
-            row.appendChild(A.el('span', 'upnext-text', task.text));
-            row.appendChild(A.el('span', 'upnext-project', project.name));
-            list.appendChild(row);
-        });
-        host.appendChild(list);
-        if (rows.length > 8) host.appendChild(A.el('p', 'hint', `+${rows.length - 8} more across your projects.`));
-    }
+        const upcoming = todays.filter((e) => e.allDay || A.parseDate(e.end) > now);
+        sub.textContent = todays.length ? `${todays.length} today` : 'Nothing today';
 
-    async function renderUpNextEvents() {
-        const host = document.getElementById('upnext-events');
-        try {
-            const status = await A.api('/calendar/status');
-            if (!status.configured) {
-                A.clear(host);
-                host.appendChild(A.el('p', 'hint', 'Google Calendar is not connected yet.'));
-                const link = A.el('a', 'inline-link', 'Set it up →');
-                link.href = 'pages/calendar.html';
-                host.appendChild(link);
-                return;
-            }
-
-            const now = new Date();
-            const end = new Date(now);
-            end.setDate(end.getDate() + 2);
-            end.setHours(0, 0, 0, 0);
-
-            const data = await A.api(`/calendar/events?timeMin=${encodeURIComponent(now.toISOString())}&timeMax=${encodeURIComponent(end.toISOString())}&maxResults=10`);
-            A.clear(host);
-
-            if (!data.events.length) {
-                host.appendChild(A.el('p', 'hint', 'Nothing scheduled in the next two days.'));
-                return;
-            }
-
-            const list = A.el('div', 'upnext-list');
-            data.events.forEach((e) => {
-                const row = A.el('a', 'upnext-item');
-                row.href = 'pages/calendar.html';
-                const when = e.allDay ? 'all day' : A.timeOfDay(e.start);
-                row.appendChild(A.el('span', 'upnext-time', when));
-                row.appendChild(A.el('span', 'upnext-text', e.summary));
-                const day = A.parseDate(e.start).toDateString() === now.toDateString() ? 'today' : 'tomorrow';
-                row.appendChild(A.el('span', 'upnext-project', day));
+        host.appendChild(A.el('div', 'mini-label', 'Today'));
+        if (!upcoming.length) {
+            host.appendChild(A.el('p', 'hint', todays.length ? "That's everything for today." : 'Your day is open.'));
+        } else {
+            const list = A.el('div', 'mini-list');
+            upcoming.slice(0, 6).forEach((e) => {
+                const row = A.link('', 'pages/calendar.html', 'mini-row');
+                const sw = A.el('span', 'event-swatch');
+                sw.style.setProperty('--swatch', e.color || 'var(--accent)');
+                row.appendChild(sw);
+                row.appendChild(A.el('span', 'dim', e.allDay ? 'All day' : A.timeOfDay(e.start)));
+                row.appendChild(A.el('span', 'grow', e.summary));
                 list.appendChild(row);
             });
             host.appendChild(list);
-        } catch (e) {
-            A.clear(host);
-            host.appendChild(A.el('p', 'hint', `Calendar unavailable: ${e.message}`));
+        }
+
+        // Next thing after today, so the tile is useful in the evening too.
+        const later = state.events
+            .filter((e) => A.dateKey(A.parseDate(e.start)) > today)
+            .sort((a, b) => A.parseDate(a.start) - A.parseDate(b.start))[0];
+        if (later) {
+            const foot = A.el('div', 'tile-foot');
+            foot.appendChild(A.el('span', 'mini-label', 'Next'));
+            const when = A.dueLabel(A.dateKey(A.parseDate(later.start))) + (later.allDay ? '' : ` · ${A.timeOfDay(later.start)}`);
+            foot.appendChild(A.el('span', 'muted', `${later.summary} — ${when}`));
+            host.appendChild(foot);
         }
     }
 
-    // ------------------------------------------------------------- actions ---
+    // --------------------------------------------------------------- plan --
 
-    function newProjectDialog() {
-        A.modal.open({
-            title: 'New project',
-            description: 'For work that has no repo yet, or that lives outside GitHub. Repos appear here automatically.',
-            fields: [
-                { name: 'name', label: 'Name', required: true, placeholder: 'e.g. Interview prep, Side app idea' },
-                { name: 'description', label: 'Description', type: 'textarea', rows: 3, placeholder: 'One or two lines on what this is.' },
-                {
-                    name: 'kind', label: 'Type', type: 'select',
-                    options: [
-                        { value: 'project', label: 'Project' },
-                        { value: 'program', label: 'Program (multi-week, has milestones)' },
-                    ],
-                },
-                { name: 'repo', label: 'Linked repo (optional)', placeholder: 'owner/name', hint: 'Fill this in later to pull live GitHub data into the project page.' },
-                { name: 'liveUrl', label: 'Live URL (optional)', placeholder: 'https://…' },
-            ],
-            submitLabel: 'Create project',
-            onSubmit: async (values) => {
-                const created = await A.api('/projects', { method: 'POST', body: values });
-                window.location.href = A.projectHref(created.id);
-            },
+    function renderPlan() {
+        const host = A.clear(document.getElementById('plan-body'));
+        if (!state.plan) { host.appendChild(A.el('p', 'hint', 'Loading…')); return; }
+
+        const today = A.todayKey();
+        const open = state.plan.tasks.filter((t) => !t.done);
+        const dueToday = open.filter((t) => t.due === today).length;
+        const overdue = open.filter((t) => t.due && t.due < today).length;
+
+        const stats = A.el('div', 'stat-row');
+        stats.appendChild(stat(dueToday, 'Due today', dueToday ? 'accent' : '', 'pages/plan.html#view=today'));
+        stats.appendChild(stat(overdue, 'Overdue', overdue ? 'danger' : '', 'pages/plan.html#view=overdue'));
+        stats.appendChild(stat(open.length, 'Open tasks', '', 'pages/plan.html#view=all'));
+        host.appendChild(stats);
+
+        // Quick add straight from the dashboard.
+        const form = A.el('form', 'quick-add compact');
+        const input = A.el('input', 'qa-title');
+        input.type = 'text';
+        input.placeholder = 'Add a task…';
+        input.setAttribute('aria-label', 'New task');
+        const due = A.el('input');
+        due.type = 'date';
+        due.setAttribute('aria-label', 'Due date');
+        form.appendChild(input);
+        form.appendChild(due);
+        form.addEventListener('submit', (e) => {
+            e.preventDefault();
+            const title = input.value.trim();
+            if (!title) return;
+            state.plan.tasks.unshift({
+                id: A.uid(), title, notes: '', due: due.value || '', time: '', priority: 'medium',
+                done: false, createdAt: new Date().toISOString(),
+            });
+            A.store.plan.save(true);
+            A.toast('Task added', 'ok');
+            refreshDerived();
+            document.querySelector('#plan-body .qa-title')?.focus();
         });
+        host.appendChild(form);
+
+        // Active roadmaps at a glance.
+        const roadmaps = state.plan.roadmaps.slice(0, 2);
+        if (roadmaps.length) {
+            host.appendChild(A.el('div', 'mini-label', 'Roadmaps'));
+            const list = A.el('div', 'mini-list');
+            roadmaps.forEach((r) => {
+                const total = r.phases.length;
+                const done = r.phases.filter((p) => p.items.length && p.items.every((i) => i.done)).length;
+                const current = r.phases.find((p) => p.start && p.end && p.start <= today && p.end >= today);
+                const row = A.link('', `pages/plan.html#roadmap=${encodeURIComponent(r.id)}`, 'mini-row');
+                row.style.flexDirection = 'column';
+                row.style.alignItems = 'stretch';
+                row.style.gap = '0.3rem';
+                const top = A.el('div', 'ptile-line');
+                top.appendChild(A.el('span', 'grow', r.title));
+                top.appendChild(A.el('span', 'when', current ? current.title.replace(/ — .*/, '') : (r.phases.some((p) => p.start) ? '' : 'Unscheduled')));
+                row.appendChild(top);
+                row.appendChild(A.progressBar(done, total));
+                list.appendChild(row);
+            });
+            host.appendChild(list);
+        }
     }
+
+    // ----------------------------------------------------------- projects --
+
+    function renderProjects() {
+        const host = A.clear(document.getElementById('projects-body'));
+        const wsEntries = Object.entries(state.workspaces);
+        const openSteps = wsEntries.reduce((n, [, ws]) => n + (ws.next || []).length, 0);
+        const shippedThisWeek = wsEntries.reduce((n, [, ws]) => n + (ws.achieved || [])
+            .filter((a) => a.date && A.daysBetween(a.date, A.todayKey()) < 7).length, 0);
+
+        const stats = A.el('div', 'stat-row');
+        const projectCount = (state.repos ? state.repos.filter((r) => !r.fork && !r.archived).length : 0) + state.custom.length;
+        stats.appendChild(stat(state.repos ? projectCount : '…', 'Projects', '', 'pages/projects.html'));
+        stats.appendChild(stat(openSteps, 'Next steps', openSteps ? 'accent' : '', 'pages/projects.html'));
+        stats.appendChild(stat(shippedThisWeek, 'Achieved (7d)', '', 'pages/projects.html'));
+        host.appendChild(stats);
+
+        const names = projectNames();
+        const recent = wsEntries
+            .filter(([, ws]) => ws.updatedAt)
+            .sort((a, b) => new Date(b[1].updatedAt) - new Date(a[1].updatedAt))
+            .slice(0, 4);
+
+        host.appendChild(A.el('div', 'mini-label', 'Recently worked on'));
+        if (!recent.length) {
+            host.appendChild(A.el('p', 'hint', 'Open a project and add a next step to start tracking it.'));
+        } else {
+            const list = A.el('div', 'mini-list');
+            recent.forEach(([id, ws]) => {
+                const row = A.el('a', 'mini-row');
+                row.href = A.projectHref(id);
+                row.appendChild(A.el('span', 'grow', names[id] || ws.projectName || A.projectLabel(id)));
+                const next = (ws.next || [])[0];
+                row.appendChild(A.el('span', 'dim', next ? `→ ${next.text}` : `${(ws.achieved || []).length} achieved`));
+                list.appendChild(row);
+            });
+            host.appendChild(list);
+        }
+
+    }
+
+    // ------------------------------------------------------------- sidebar --
+
+    function renderSidebar() {
+        const items = allItems();
+        const groups = A.items.group(items);
+        const urgent = groups.find((g) => g.key === 'overdue').items.length;
+        const today = groups.find((g) => g.key === 'today').items.length;
+        const openTasks = state.plan ? state.plan.tasks.filter((t) => !t.done).length : '';
+
+        window.Nav.setSections([
+            {
+                label: 'Modules',
+                items: [
+                    { label: 'Plan', href: 'pages/plan.html', icon: 'plan', count: openTasks },
+                    { label: 'Up next', href: 'pages/upnext.html', icon: 'upnext', count: urgent || today || '', countTone: urgent ? 'danger' : 'accent' },
+                    { label: 'Projects', href: 'pages/projects.html', icon: 'projects' },
+                    { label: 'Calendar', href: 'pages/calendar.html', icon: 'calendar' },
+                    { label: 'Jobs', href: 'pages/jobs.html', icon: 'jobs', count: 'soon' },
+                    { label: 'Habit tracker', href: '#habits', icon: 'habits' },
+                ],
+            },
+            {
+                label: 'Data',
+                items: [
+                    { label: 'Export backup', icon: 'download', onClick: exportBackup, title: 'Download everything as JSON' },
+                    { label: 'Restore backup', icon: 'upload', onClick: () => document.getElementById('restore-file').click() },
+                    ...(state.calendar.configured ? [{ label: 'Re-sync calendar', icon: 'refresh', onClick: resync }] : []),
+                ],
+            },
+        ]);
+    }
+
+    function refreshDerived() {
+        // Pull in whatever the store now holds (a tick from a tile changes it).
+        if (A.store.plan.doc) state.plan = A.store.plan.doc;
+        Object.keys(state.workspaces).forEach((id) => {
+            const ws = A.store.workspace(id);
+            if (ws.doc) state.workspaces[id] = ws.doc;
+        });
+        renderUpNext();
+        renderPlan();
+        renderProjects();
+        renderSidebar();
+    }
+
+    // ------------------------------------------------------------- backup --
 
     async function exportBackup() {
         try {
@@ -317,43 +294,40 @@
             const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
             const link = document.createElement('a');
             link.href = URL.createObjectURL(blob);
-            link.download = `admin-workspace-${new Date().toISOString().slice(0, 10)}.json`;
+            link.download = `control-panel-backup-${A.todayKey()}.json`;
             link.click();
-            URL.revokeObjectURL(link.href);
+            setTimeout(() => URL.revokeObjectURL(link.href), 1000);
             A.toast('Backup downloaded', 'ok');
         } catch (e) {
             A.toast(e.message, 'error');
         }
     }
 
-    // Restores an exported file. Projects and workspaces present in the file
-    // overwrite what's in KV; anything not in the file is left alone.
     function restoreBackup(file) {
         const reader = new FileReader();
         reader.onload = () => {
             let parsed;
-            try {
-                parsed = JSON.parse(reader.result);
-            } catch {
-                A.toast('That file is not valid JSON', 'error');
+            try { parsed = JSON.parse(reader.result); } catch { A.toast('That file is not valid JSON', 'error'); return; }
+            if (!parsed.workspaces && !parsed.customProjects && !parsed.plan && !parsed.habits) {
+                A.toast('That does not look like a Control Panel backup', 'error');
                 return;
             }
-            if (!parsed.workspaces && !parsed.customProjects) {
-                A.toast('That does not look like an admin backup', 'error');
-                return;
-            }
-
-            const projectCount = (parsed.customProjects || []).length;
+            const parts = [];
+            if (parsed.plan) parts.push('your plan');
+            if (parsed.habits) parts.push('habits');
+            if (parsed.customProjects) parts.push(`${parsed.customProjects.length} manual projects`);
             const wsCount = Object.keys(parsed.workspaces || {}).length;
+            if (wsCount) parts.push(`${wsCount} project workspaces`);
             A.modal.open({
                 title: 'Restore from backup?',
-                description: `This overwrites ${projectCount} manual project${projectCount === 1 ? '' : 's'} and ${wsCount} workspace${wsCount === 1 ? '' : 's'} with the contents of ${file.name}. Anything not in the file is left as it is.`,
+                description: `This overwrites ${parts.join(', ')} with the contents of ${file.name}. Anything not in the file is left as it is.`,
                 fields: [],
                 submitLabel: 'Restore',
+                danger: true,
                 onSubmit: async () => {
                     await A.api('/import', { method: 'POST', body: parsed });
                     A.toast('Backup restored', 'ok');
-                    window.location.reload();
+                    setTimeout(() => window.location.reload(), 600);
                 },
             });
         };
@@ -361,50 +335,54 @@
         reader.readAsText(file);
     }
 
-    // ---------------------------------------------------------------- init ---
-
-    function initControls() {
-        document.getElementById('new-project-btn').addEventListener('click', newProjectDialog);
-        document.getElementById('export-btn').addEventListener('click', exportBackup);
-
-        const fileInput = document.getElementById('restore-file');
-        document.getElementById('restore-btn').addEventListener('click', () => fileInput.click());
-        fileInput.addEventListener('change', () => {
-            const file = fileInput.files[0];
-            if (file) restoreBackup(file);
-            fileInput.value = '';
-        });
-
-        const search = document.getElementById('project-search');
-        const onSearch = A.debounce(() => { state.search = search.value.trim(); renderGrid(); }, 180);
-        search.addEventListener('input', onSearch);
-
-        document.getElementById('project-sort').addEventListener('change', (e) => {
-            state.sort = e.target.value;
-            renderGrid();
-        });
+    async function resync() {
+        A.toast('Syncing with Google Calendar…');
+        await A.calendarSync.now();
+        A.toast('Calendar is up to date', 'ok');
     }
 
-    async function load() {
-        initControls();
-        renderFilters();
-        renderUpNextEvents();
+    const fileInput = document.getElementById('restore-file');
+    fileInput.addEventListener('change', () => {
+        if (fileInput.files[0]) restoreBackup(fileInput.files[0]);
+        fileInput.value = '';
+    });
 
-        // Workspaces and custom projects come from KV; repos from GitHub. Each
-        // is allowed to fail on its own without blanking the whole dashboard.
-        const [repos, custom, workspaces] = await Promise.all([
-            A.api('/repos').catch((e) => { A.toast(`GitHub: ${e.message}`, 'error'); return []; }),
-            A.api('/projects').catch((e) => { A.toast(`Projects: ${e.message}`, 'error'); return []; }),
+    // --------------------------------------------------------------- load --
+
+    async function load() {
+        renderSidebar();
+        renderPlan();
+        renderCalendar();
+        A.habits.mount(document.getElementById('habits-body'), {
+            rangeHost: document.getElementById('habit-range'),
+            subHost: document.getElementById('habits-sub'),
+        });
+
+        // Each source can fail on its own without blanking the dashboard.
+        const [plan, workspaces, custom, cal] = await Promise.all([
+            A.store.plan.load().catch((e) => { A.toast(`Plan: ${e.message}`, 'error'); return null; }),
             A.api('/workspaces').catch(() => ({})),
+            A.api('/projects').catch(() => []),
+            A.items.fetchEvents(8),
         ]);
 
-        state.repos = repos;
+        state.plan = plan || { tasks: [], roadmaps: [] };
         state.custom = custom;
-        state.workspaces = workspaces;
+        Object.entries(workspaces).forEach(([id, ws]) => { state.workspaces[id] = A.store.workspace(id).seed(ws); });
+        state.calendar = { configured: cal.configured };
+        state.events = cal.events;
+        if (cal.error) A.toast(`Calendar: ${cal.error}`, 'error');
 
-        buildProjects();
-        renderGrid();
-        renderUpNextTasks();
+        renderUpNext();
+        renderCalendar();
+        renderPlan();
+        renderProjects();
+        renderSidebar();
+
+        // Repos are the slow call; fill in names and counts when they land.
+        A.api('/repos')
+            .then((repos) => { state.repos = repos; renderProjects(); renderUpNext(); })
+            .catch(() => { state.repos = []; renderProjects(); });
     }
 
     load();

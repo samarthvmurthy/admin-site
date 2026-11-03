@@ -3,50 +3,68 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Project</title>
+<title>Project — Control Panel</title>
 <link rel="icon" type="image/svg+xml" href="../assets/icon.svg">
+<script src="../js/theme.js"></script>
 <link rel="stylesheet" href="../styles.css">
 </head>
-<body>
+<body data-module="projects">
 <div class="shell">
     <aside class="sidebar" id="sidebar"></aside>
     <div class="sidebar-overlay" id="sidebar-overlay"></div>
 
     <div class="content">
-        <div class="topbar">
-            <button class="menu-toggle" id="menu-toggle" aria-label="Open menu">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
-            </button>
-            <div>
-                <a href="../index.html" class="breadcrumb">← All projects</a>
+        <header class="topbar">
+            <button class="menu-toggle" id="menu-toggle" aria-label="Open menu"></button>
+            <div class="topbar-title">
+                <a href="projects.html" class="breadcrumb">‹ Projects</a>
                 <h1 id="project-title">Project</h1>
                 <p id="project-subtitle">Loading…</p>
             </div>
             <div class="topbar-actions" id="project-actions"></div>
-        </div>
+        </header>
 
-        <main>
+        <main class="wide">
             <p class="hint" id="load-hint">Loading project…</p>
 
             <div id="app" style="display:none;">
                 <div class="split">
-                    <!-- Left: live, read-only truth from GitHub -->
-                    <section class="panel split-col" id="panel-repo">
-                        <div class="panel-head">
-                            <h2>Repository</h2>
-                            <span class="panel-head-note" id="repo-head-note"></span>
-                        </div>
-                        <div id="repo-body"></div>
-                    </section>
+                    <div class="split-stack">
+                        <section class="panel" id="sec-next">
+                            <div class="panel-head">
+                                <h2>Next steps <span class="badge" id="next-count"></span></h2>
+                            </div>
+                            <div id="next-body"></div>
+                        </section>
 
-                    <!-- Right: your own editable space -->
-                    <section class="panel split-col" id="panel-workspace">
-                        <div class="panel-head">
-                            <h2>Workspace</h2>
-                            <span class="save-indicator" id="save-indicator">Saved</span>
-                        </div>
-                        <div id="workspace-body"></div>
-                    </section>
+                        <section class="panel" id="sec-achieved">
+                            <div class="panel-head">
+                                <h2>Achieved <span class="badge" id="achieved-count"></span></h2>
+                            </div>
+                            <div id="achieved-body"></div>
+                        </section>
+
+                        <section class="panel" id="sec-notes">
+                            <h2>Notes</h2>
+                            <p class="hint">Open questions, design decisions, trade-offs — whatever future you needs.</p>
+                            <div id="notes-body"></div>
+                        </section>
+                    </div>
+
+                    <div class="split-stack">
+                        <section class="panel" id="sec-details">
+                            <h2>Details</h2>
+                            <div id="details-body"></div>
+                        </section>
+
+                        <section class="panel" id="sec-repo">
+                            <div class="panel-head">
+                                <h2>Repository</h2>
+                                <span class="panel-head-note" id="repo-head-note"></span>
+                            </div>
+                            <div id="repo-body"></div>
+                        </section>
+                    </div>
                 </div>
             </div>
         </main>
@@ -58,6 +76,8 @@
 <script src="../js/nav.js"></script>
 <script src="../js/common.js"></script>
 <script src="../js/modal.js"></script>
+<script src="../js/store.js"></script>
+<script src="../js/items.js"></script>
 <script src="../js/project.js"></script>
 </body>
 </html>

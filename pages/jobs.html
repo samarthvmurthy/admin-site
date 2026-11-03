@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Jobs — Control Panel</title>
+<link rel="icon" type="image/svg+xml" href="../assets/icon.svg">
+<script src="../js/theme.js"></script>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body data-module="jobs">
+<div class="shell">
+    <aside class="sidebar" id="sidebar"></aside>
+    <div class="sidebar-overlay" id="sidebar-overlay"></div>
+
+    <div class="content">
+        <header class="topbar">
+            <button class="menu-toggle" id="menu-toggle" aria-label="Open menu"></button>
+            <div class="topbar-title">
+                <h1>Jobs</h1>
+                <p>Applications, interviews and follow-ups.</p>
+            </div>
+            <div class="topbar-actions"></div>
+        </header>
+
+        <main class="narrow">
+            <section class="panel">
+                <div class="empty-state">
+                    <strong>Integration coming soon</strong>
+                    This module will plug in your job-tracking project. Once it's connected, application deadlines and
+                    interviews will flow into Up next and your calendar like everything else here.
+                </div>
+            </section>
+        </main>
+    </div>
+</div>
+
+<script src="../js/nav.js"></script>
+<script>
+    window.Nav.setSections([{
+        label: 'Jobs',
+        items: [{ label: 'Overview', icon: 'jobs', active: true, href: 'pages/jobs.html' }],
+    }]);
+</script>
+</body>
+</html>

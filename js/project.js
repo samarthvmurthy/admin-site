@@ -1,21 +1,16 @@
 /**
- * Project page: two halves side by side.
- *   Left  — Repository: live, read-only truth pulled from GitHub.
- *   Right — Workspace: your next steps, what's shipped, and room to think.
+ * Project page.
+ *   Left  — your workspace: next steps, what's been achieved, notes.
+ *   Right — details you curate, and live read-only data from GitHub.
  *
- * The workspace autosaves to KV a short beat after you stop typing.
+ * The workspace autosaves; dated next steps are mirrored to your calendar.
  */
 (function () {
     const A = window.Admin;
 
-    const LANES = [
-        { key: 'next', label: 'Next steps', hint: 'What you do when you next sit down' },
-        { key: 'doing', label: 'In progress', hint: 'Started, not finished' },
-        { key: 'live', label: 'Shipped & live', hint: 'Done and out in the world' },
-    ];
     const STATUSES = [
-        { value: 'idea', label: 'Idea' },
         { value: 'active', label: 'Active' },
+        { value: 'idea', label: 'Idea' },
         { value: 'paused', label: 'Paused' },
         { value: 'shipped', label: 'Shipped' },
     ];
@@ -25,45 +20,306 @@
         project: null,   // custom-project record, when this is a manual project
         repoName: null,  // owner/name, when a repo is attached
         detail: null,    // GitHub payload
-        ws: null,        // workspace doc
+        store: null,     // Admin.store workspace doc
+        roadmaps: [],
+        others: {},      // other workspaces, for the sidebar
     };
+    const ws = () => state.store.doc;
+    const indicator = A.store.indicator();
+    const save = (now) => state.store.save(now);
 
-    // ------------------------------------------------------------- persistence
+    // ---------------------------------------------------------- next steps --
 
-    function setSaveState(text, cls) {
-        const node = document.getElementById('save-indicator');
-        node.textContent = text;
-        node.className = `save-indicator${cls ? ' ' + cls : ''}`;
+    function sortSteps(list) {
+        return [...list].sort((a, b) => {
+            if (a.due && b.due) return a.due.localeCompare(b.due) || A.priorityRank(a.priority) - A.priorityRank(b.priority);
+            if (a.due) return -1;
+            if (b.due) return 1;
+            return A.priorityRank(a.priority) - A.priorityRank(b.priority);
+        });
     }
 
-    async function saveNow() {
-        setSaveState('Saving…', 'saving');
-        try {
-            const saved = await A.api(`/workspace?id=${encodeURIComponent(state.id)}`, {
-                method: 'PUT',
-                body: state.ws,
+    function stepDialog(step) {
+        A.modal.open({
+            title: 'Edit next step',
+            fields: [
+                { name: 'text', label: 'Step', required: true, value: step.text },
+                { name: 'due', label: 'Due date', type: 'date', value: step.due || '', half: true },
+                { name: 'time', label: 'Time (optional)', type: 'time', value: step.time || '', half: true },
+                { name: 'priority', label: 'Priority', type: 'select', value: step.priority || 'medium', options: A.PRIORITIES, half: true },
+            ],
+            submitLabel: 'Save',
+            destructiveLabel: 'Delete',
+            onDestructive: () => {
+                ws().next = ws().next.filter((s) => s.id !== step.id);
+                save(true);
+                renderWorkspace();
+            },
+            onSubmit: (v) => {
+                if (v.time && !v.due) throw new Error('Pick a date to go with that time.');
+                Object.assign(step, { text: v.text, due: v.due, time: v.time, priority: v.priority });
+                save(true);
+                renderWorkspace();
+            },
+        });
+    }
+
+    function renderNext() {
+        const host = A.clear(document.getElementById('next-body'));
+        document.getElementById('next-count').textContent = String(ws().next.length);
+
+        const form = A.el('form', 'quick-add compact');
+        form.style.marginBottom = '0.6rem';
+        const text = A.el('input', 'qa-title');
+        text.type = 'text';
+        text.placeholder = 'What\'s the next step?';
+        text.setAttribute('aria-label', 'Next step');
+        const due = A.el('input');
+        due.type = 'date';
+        due.setAttribute('aria-label', 'Due date');
+        const prio = A.el('select');
+        prio.setAttribute('aria-label', 'Priority');
+        A.PRIORITIES.forEach((p) => {
+            const o = A.el('option', null, p.label);
+            o.value = p.value;
+            if (p.value === 'medium') o.selected = true;
+            prio.appendChild(o);
+        });
+        const add = A.el('button', 'btn btn-add-primary btn-small', 'Add');
+        add.type = 'submit';
+        [text, due, prio, add].forEach((n) => form.appendChild(n));
+        form.addEventListener('submit', (e) => {
+            e.preventDefault();
+            const value = text.value.trim();
+            if (!value) { text.focus(); return; }
+            ws().next.push({ id: A.uid(), text: value, due: due.value, time: '', priority: prio.value, createdAt: new Date().toISOString() });
+            save(true);
+            renderWorkspace();
+            document.querySelector('#next-body .qa-title')?.focus();
+        });
+        host.appendChild(form);
+
+        if (!ws().next.length) {
+            host.appendChild(A.el('p', 'hint', 'No next steps. Write down what you\'ll do the next time you sit down with this.'));
+            return;
+        }
+
+        const rows = A.el('div', 'row-list');
+        sortSteps(ws().next).forEach((s) => {
+            const row = A.el('div', 'item-row');
+            row.appendChild(A.checkbox(false, () => {
+                row.classList.add('is-done');
+                row.querySelector('.check').classList.add('on');
+                setTimeout(() => {
+                    A.items.completeStep(ws(), s.id);
+                    save(true);
+                    renderWorkspace();
+                    A.toast('Moved to Achieved', 'ok');
+                }, 260);
+            }, `Mark "${s.text}" done`));
+            const main = A.el('div', 'item-main');
+            main.tabIndex = 0;
+            main.setAttribute('role', 'button');
+            main.appendChild(A.el('span', 'item-title', s.text));
+            main.addEventListener('click', () => stepDialog(s));
+            main.addEventListener('keydown', (e) => { if (e.key === 'Enter') stepDialog(s); });
+            row.appendChild(main);
+            const meta = A.el('div', 'item-meta');
+            meta.appendChild(A.priorityFlag(s.priority));
+            const chip = A.dueChip(s.due, s.time);
+            if (chip) meta.appendChild(chip);
+            const actions = A.el('div', 'item-actions');
+            actions.appendChild(A.iconButton('trash', 'Delete step', () => {
+                ws().next = ws().next.filter((x) => x.id !== s.id);
+                save(true);
+                renderWorkspace();
+            }, 'icon-btn sm danger'));
+            meta.appendChild(actions);
+            row.appendChild(meta);
+            rows.appendChild(row);
+        });
+        host.appendChild(rows);
+    }
+
+    // ------------------------------------------------------------ achieved --
+
+    function renderAchieved() {
+        const host = A.clear(document.getElementById('achieved-body'));
+        document.getElementById('achieved-count').textContent = String(ws().achieved.length);
+
+        const form = A.el('form', 'quick-add compact');
+        form.style.marginBottom = '0.6rem';
+        const text = A.el('input', 'qa-title');
+        text.type = 'text';
+        text.placeholder = 'Log something you shipped or finished…';
+        text.setAttribute('aria-label', 'Achievement');
+        const date = A.el('input');
+        date.type = 'date';
+        date.value = A.todayKey();
+        date.setAttribute('aria-label', 'Date');
+        const add = A.el('button', 'btn btn-edit btn-small', 'Log');
+        add.type = 'submit';
+        [text, date, add].forEach((n) => form.appendChild(n));
+        form.addEventListener('submit', (e) => {
+            e.preventDefault();
+            const value = text.value.trim();
+            if (!value) { text.focus(); return; }
+            ws().achieved.unshift({ id: A.uid(), text: value, date: date.value || A.todayKey() });
+            ws().achieved.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+            save(true);
+            renderWorkspace();
+        });
+        host.appendChild(form);
+
+        if (!ws().achieved.length) {
+            host.appendChild(A.el('p', 'hint', 'Tick off a next step, or log a win here, and it builds a record of progress.'));
+            return;
+        }
+
+        const list = A.el('div', 'achieved-list');
+        ws().achieved.forEach((a) => {
+            const item = A.el('div', 'achieved-item item-row');
+            item.appendChild(A.el('span', 'achieved-dot'));
+            const body = A.el('div', 'achieved-body');
+            body.appendChild(A.el('div', 'achieved-text', a.text));
+            if (a.date) body.appendChild(A.el('div', 'achieved-date', A.parseDate(a.date).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })));
+            item.appendChild(body);
+            const actions = A.el('div', 'item-actions');
+            actions.appendChild(A.iconButton('refresh', 'Move back to next steps', () => {
+                A.items.reopenStep(ws(), a.id);
+                save(true);
+                renderWorkspace();
+            }, 'icon-btn sm'));
+            actions.appendChild(A.iconButton('trash', 'Delete', () => {
+                ws().achieved = ws().achieved.filter((x) => x.id !== a.id);
+                save(true);
+                renderWorkspace();
+            }, 'icon-btn sm danger'));
+            item.appendChild(actions);
+            list.appendChild(item);
+        });
+        host.appendChild(list);
+    }
+
+    // ------------------------------------------------------- notes/details --
+
+    function renderNotes() {
+        const host = A.clear(document.getElementById('notes-body'));
+        const ta = A.el('textarea');
+        ta.rows = 12;
+        ta.value = ws().notes || '';
+        ta.placeholder = 'Thinking, design, architecture, decisions…';
+        ta.setAttribute('aria-label', 'Notes');
+        ta.addEventListener('input', () => { ws().notes = ta.value; save(); });
+        host.appendChild(ta);
+    }
+
+    function fieldRow(label, input) {
+        const row = A.el('div', 'field-row');
+        row.appendChild(A.el('div', 'field-label', label));
+        const val = A.el('div', 'field-value-plain');
+        val.appendChild(input);
+        row.appendChild(val);
+        return row;
+    }
+
+    function renderDetails() {
+        const host = A.clear(document.getElementById('details-body'));
+
+        const status = A.el('select');
+        STATUSES.forEach((s) => {
+            const o = A.el('option', null, s.label);
+            o.value = s.value;
+            if (s.value === ws().status) o.selected = true;
+            status.appendChild(o);
+        });
+        status.addEventListener('change', () => { ws().status = status.value; save(true); });
+        host.appendChild(fieldRow('Status', status));
+
+        const summary = A.el('textarea');
+        summary.rows = 2;
+        summary.value = ws().summary || '';
+        summary.placeholder = 'One line that explains this project to future you.';
+        summary.addEventListener('input', () => { ws().summary = summary.value; save(); });
+        host.appendChild(fieldRow('Summary', summary));
+
+        const live = A.el('input');
+        live.type = 'url';
+        live.placeholder = 'https://…';
+        live.value = ws().liveUrl || '';
+        live.addEventListener('input', () => { ws().liveUrl = live.value; save(); renderHeader(); });
+        host.appendChild(fieldRow('Live URL', live));
+
+        // Links
+        const links = A.el('div', 'repeater-inline');
+        ws().links.forEach((link, i) => {
+            const row = A.el('div', 'repeater-item-row');
+            const label = A.el('input', 'input-narrow');
+            label.type = 'text';
+            label.placeholder = 'Label';
+            label.value = link.label || '';
+            label.style.maxWidth = '9rem';
+            label.addEventListener('input', () => { link.label = label.value; save(); });
+            row.appendChild(label);
+            const url = A.el('input');
+            url.type = 'url';
+            url.placeholder = 'https://…';
+            url.value = link.url || '';
+            url.addEventListener('input', () => { link.url = url.value; save(); });
+            row.appendChild(url);
+            if (link.url) {
+                const open = A.el('a', 'icon-btn sm');
+                open.href = link.url;
+                open.target = '_blank';
+                open.rel = 'noopener';
+                open.title = 'Open';
+                open.innerHTML = window.Nav.svg('external', 14);
+                row.appendChild(open);
+            }
+            row.appendChild(A.iconButton('x', 'Remove link', () => { ws().links.splice(i, 1); save(true); renderDetails(); }, 'icon-btn sm danger'));
+            links.appendChild(row);
+        });
+        const linkWrap = A.el('div');
+        linkWrap.appendChild(links);
+        linkWrap.appendChild(A.button('+ Add link', 'btn-add', () => { ws().links.push({ label: '', url: '' }); renderDetails(); }));
+        host.appendChild(fieldRow('Links', linkWrap));
+
+        // Roadmaps that point at this project
+        const linked = state.roadmaps.filter((r) => r.projectId === state.id);
+        const rmWrap = A.el('div');
+        if (linked.length) {
+            linked.forEach((r) => {
+                const items = r.phases.flatMap((p) => p.items);
+                const a = A.link(r.title, `pages/plan.html#roadmap=${encodeURIComponent(r.id)}`, 'inline-link');
+                rmWrap.appendChild(a);
+                rmWrap.appendChild(A.progressBar(items.filter((i) => i.done).length, items.length));
             });
-            state.ws.updatedAt = saved.updatedAt;
-            setSaveState(`Saved ${A.relativeTime(saved.updatedAt)}`, 'ok');
-        } catch (e) {
-            setSaveState('Not saved', 'error');
-            A.toast(`Save failed: ${e.message}`, 'error');
+        } else {
+            const p = A.el('p', 'hint');
+            p.style.margin = '0.4rem 0 0';
+            p.appendChild(document.createTextNode('None. Long project? '));
+            p.appendChild(A.link('Plan a roadmap', 'pages/plan.html#roadmaps', 'inline-link'));
+            p.appendChild(document.createTextNode(' and link it here.'));
+            rmWrap.appendChild(p);
+        }
+        host.appendChild(fieldRow('Roadmap', rmWrap));
+
+        const tools = A.projectTools(state.id);
+        if (tools.length) {
+            const wrap = A.el('div');
+            tools.forEach((t) => {
+                wrap.appendChild(A.link(`${t.label} →`, t.href, 'inline-link'));
+                if (t.hint) wrap.appendChild(A.el('div', 'hint', t.hint));
+            });
+            host.appendChild(fieldRow('Tools', wrap));
         }
     }
 
-    const queueSave = A.debounce(saveNow, 700);
-
-    function touch(immediate) {
-        setSaveState('Unsaved…', 'dirty');
-        if (immediate) queueSave.flush();
-        else queueSave();
+    function renderWorkspace() {
+        renderNext();
+        renderAchieved();
+        renderSidebar();
     }
-
-    // Don't lose the last few keystrokes when the tab goes away.
-    window.addEventListener('beforeunload', () => queueSave.flush());
-    document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'hidden') queueSave.flush();
-    });
 
     // ------------------------------------------------------------ repo side --
 
@@ -93,10 +349,7 @@
     }
 
     function linkRow(text, href, trailing) {
-        const row = A.el('a', 'repo-list-item');
-        row.href = href;
-        row.target = '_blank';
-        row.rel = 'noopener';
+        const row = A.externalLink('', href, 'repo-list-item');
         row.appendChild(A.el('span', 'repo-list-text', text));
         if (trailing) row.appendChild(A.el('span', 'repo-list-meta', trailing));
         return row;
@@ -106,20 +359,20 @@
         const block = A.el('div', 'repo-block');
         const head = A.el('button', 'collapse-head');
         head.type = 'button';
+        head.setAttribute('aria-expanded', 'false');
         head.appendChild(A.el('span', 'subfield-label', title));
         const chev = A.el('span', 'collapse-chev', '▾');
         head.appendChild(chev);
         const body = A.el('div', 'collapse-body');
         body.style.display = 'none';
-
         let built = false;
         head.addEventListener('click', () => {
             const open = body.style.display === 'none';
             body.style.display = open ? 'block' : 'none';
             chev.textContent = open ? '▴' : '▾';
+            head.setAttribute('aria-expanded', String(open));
             if (open && !built) { buildBody(body); built = true; }
         });
-
         block.appendChild(head);
         block.appendChild(body);
         return block;
@@ -136,13 +389,12 @@
                 host.appendChild(A.button('Link a GitHub repo', 'btn btn-edit btn-small', () => {
                     A.modal.open({
                         title: 'Link a repository',
-                        description: 'Once linked, this side fills with live data from GitHub.',
+                        description: 'Once linked, this panel fills with live data from GitHub.',
                         fields: [{ name: 'repo', label: 'Repository', required: true, placeholder: 'owner/name' }],
                         submitLabel: 'Link',
                         onSubmit: async (values) => {
-                            await A.api(`/projects?id=${encodeURIComponent(state.id)}`, {
-                                method: 'PATCH', body: { repo: values.repo },
-                            });
+                            if (!/^[\w.-]+\/[\w.-]+$/.test(values.repo)) throw new Error('Use the form owner/name.');
+                            await A.api(`/projects?id=${encodeURIComponent(state.id)}`, { method: 'PATCH', body: { repo: values.repo } });
                             window.location.reload();
                         },
                     });
@@ -160,9 +412,7 @@
         const { repo, languages, commits, branches, issues, pulls, readmeHtml } = state.detail;
         note.textContent = repo.private ? 'private' : 'public';
 
-        // Headline facts
         host.appendChild(statRow([
-            ['Commits shown', commits.length ? `${commits.length}` : null],
             ['Branches', branches.length],
             ['Open issues', issues.length],
             ['Open PRs', pulls.length],
@@ -200,10 +450,7 @@
             ), ''));
         }
 
-        host.appendChild(listBlock('Open issues', issues.map((i) =>
-            linkRow(i.title, i.html_url, `#${i.number}`)
-        ), 'No open issues.'));
-
+        host.appendChild(listBlock('Open issues', issues.map((i) => linkRow(i.title, i.html_url, `#${i.number}`)), 'No open issues.'));
         host.appendChild(listBlock('Branches', branches.map((b) =>
             linkRow(b.name, `${repo.html_url}/tree/${encodeURIComponent(b.name)}`, b.protected ? 'protected' : '')
         ), 'No branches found.'));
@@ -217,322 +464,102 @@
         }
     }
 
-    // ------------------------------------------------------- workspace side --
+    // --------------------------------------------------------------- chrome --
 
-    function textarea(value, rows, onInput) {
-        const ta = A.el('textarea');
-        ta.rows = rows;
-        ta.value = value || '';
-        ta.addEventListener('input', () => { onInput(ta.value); touch(); });
-        return ta;
+    function projectName() {
+        return state.project?.name || state.detail?.repo?.name || A.projectLabel(state.repoName || state.id) || 'Project';
     }
-
-    function fieldRow(label, inputEl) {
-        const row = A.el('div', 'field-row');
-        row.appendChild(A.el('div', 'field-label', label));
-        const val = A.el('div', 'field-value-plain');
-        val.appendChild(inputEl);
-        row.appendChild(val);
-        return row;
-    }
-
-    function renderBoard(host) {
-        const board = A.el('div', 'board');
-
-        LANES.forEach((lane) => {
-            const col = A.el('div', 'board-col');
-            const head = A.el('div', 'board-col-head');
-            head.appendChild(A.el('span', 'board-col-title', lane.label));
-            const tasks = state.ws.tasks.filter((t) => t.lane === lane.key);
-            head.appendChild(A.el('span', 'board-col-count', String(tasks.length)));
-            col.appendChild(head);
-            col.appendChild(A.el('div', 'board-col-hint', lane.hint));
-
-            const list = A.el('div', 'board-list');
-            tasks.forEach((task) => list.appendChild(taskCard(task)));
-            col.appendChild(list);
-
-            const input = A.el('input', 'board-add');
-            input.type = 'text';
-            input.placeholder = '+ add';
-            input.addEventListener('keydown', (e) => {
-                if (e.key !== 'Enter' || !input.value.trim()) return;
-                state.ws.tasks.push({
-                    id: A.uid(), text: input.value.trim(), lane: lane.key, created: new Date().toISOString(),
-                });
-                input.value = '';
-                touch(true);
-                renderWorkspace();
-                // Keep typing in the same column after a re-render.
-                const next = document.querySelector(`.board-col[data-lane="${lane.key}"] .board-add`);
-                if (next) next.focus();
-            });
-            col.appendChild(input);
-
-            col.dataset.lane = lane.key;
-            board.appendChild(col);
-        });
-
-        host.appendChild(board);
-    }
-
-    function taskCard(task) {
-        const card = A.el('div', 'task-card');
-
-        const text = A.el('div', 'task-text');
-        text.contentEditable = 'true';
-        text.textContent = task.text;
-        text.addEventListener('blur', () => {
-            const next = text.textContent.trim();
-            if (next && next !== task.text) { task.text = next; touch(true); }
-            else text.textContent = task.text;
-        });
-        text.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') { e.preventDefault(); text.blur(); }
-        });
-        card.appendChild(text);
-
-        const actions = A.el('div', 'task-actions');
-
-        // Move between lanes without dragging — faster on a phone, too.
-        const laneIndex = LANES.findIndex((l) => l.key === task.lane);
-        if (laneIndex > 0) {
-            actions.appendChild(A.button('←', 'task-btn', () => {
-                task.lane = LANES[laneIndex - 1].key;
-                touch(true);
-                renderWorkspace();
-            }));
-        }
-        if (laneIndex < LANES.length - 1) {
-            actions.appendChild(A.button('→', 'task-btn', () => {
-                task.lane = LANES[laneIndex + 1].key;
-                touch(true);
-                renderWorkspace();
-            }));
-        }
-        actions.appendChild(A.button('✕', 'task-btn task-btn-danger', () => {
-            state.ws.tasks = state.ws.tasks.filter((t) => t.id !== task.id);
-            touch(true);
-            renderWorkspace();
-        }));
-
-        card.appendChild(actions);
-        return card;
-    }
-
-    function renderMilestones(host) {
-        const block = A.el('div', 'subsection');
-        const head = A.el('div', 'subsection-head');
-        const done = state.ws.milestones.filter((m) => m.done).length;
-        head.appendChild(A.el('div', 'subfield-label', `Milestones ${state.ws.milestones.length ? `— ${done}/${state.ws.milestones.length} done` : ''}`));
-        block.appendChild(head);
-
-        if (state.ws.milestones.length) {
-            const track = A.el('div', 'progress-track progress-track-lg');
-            const fill = A.el('div', 'progress-fill');
-            fill.style.width = `${(done / state.ws.milestones.length) * 100}%`;
-            track.appendChild(fill);
-            block.appendChild(track);
-        }
-
-        const list = A.el('div', 'milestone-list');
-        state.ws.milestones.forEach((m) => {
-            const row = A.el('div', `milestone-row${m.done ? ' done' : ''}`);
-
-            const box = A.el('input');
-            box.type = 'checkbox';
-            box.checked = Boolean(m.done);
-            box.addEventListener('change', () => {
-                m.done = box.checked;
-                touch(true);
-                renderWorkspace();
-            });
-            row.appendChild(box);
-
-            const label = A.el('div', 'milestone-label');
-            label.contentEditable = 'true';
-            label.textContent = m.label;
-            label.addEventListener('blur', () => {
-                const next = label.textContent.trim();
-                if (next && next !== m.label) { m.label = next; touch(true); }
-            });
-            row.appendChild(label);
-
-            const due = A.el('input', 'milestone-due');
-            due.type = 'date';
-            due.value = m.due || '';
-            due.addEventListener('change', () => { m.due = due.value; touch(true); });
-            row.appendChild(due);
-
-            row.appendChild(A.button('✕', 'task-btn task-btn-danger', () => {
-                state.ws.milestones = state.ws.milestones.filter((x) => x.id !== m.id);
-                touch(true);
-                renderWorkspace();
-            }));
-
-            list.appendChild(row);
-        });
-        block.appendChild(list);
-
-        block.appendChild(A.button('+ Add milestone', 'btn-add', () => {
-            state.ws.milestones.push({ id: A.uid(), label: 'New milestone', done: false, due: '' });
-            touch(true);
-            renderWorkspace();
-        }));
-
-        host.appendChild(block);
-    }
-
-    function renderLinks(host) {
-        const block = A.el('div', 'subsection');
-        block.appendChild(A.el('div', 'subfield-label', 'Links'));
-
-        const list = A.el('div', 'repeater-inline');
-        state.ws.links.forEach((link, i) => {
-            const row = A.el('div', 'repeater-item-row');
-
-            const label = A.el('input', 'input-narrow');
-            label.type = 'text';
-            label.placeholder = 'Label';
-            label.value = link.label || '';
-            label.addEventListener('input', () => { link.label = label.value; touch(); });
-            row.appendChild(label);
-
-            const url = A.el('input');
-            url.type = 'url';
-            url.placeholder = 'https://…';
-            url.value = link.url || '';
-            url.addEventListener('input', () => { link.url = url.value; touch(); });
-            row.appendChild(url);
-
-            if (link.url) {
-                const open = A.el('a', 'task-btn', '↗');
-                open.href = link.url;
-                open.target = '_blank';
-                open.rel = 'noopener';
-                row.appendChild(open);
-            }
-
-            row.appendChild(A.button('✕', 'task-btn task-btn-danger', () => {
-                state.ws.links.splice(i, 1);
-                touch(true);
-                renderWorkspace();
-            }));
-
-            list.appendChild(row);
-        });
-        block.appendChild(list);
-
-        block.appendChild(A.button('+ Add link', 'btn-add', () => {
-            state.ws.links.push({ label: '', url: '' });
-            touch();
-            renderWorkspace();
-        }));
-
-        host.appendChild(block);
-    }
-
-    function renderWorkspace() {
-        const host = A.clear(document.getElementById('workspace-body'));
-
-        // Status + the one-liner that explains the project to future you.
-        const statusSelect = A.el('select', 'select-plain');
-        STATUSES.forEach((s) => {
-            const o = A.el('option', null, s.label);
-            o.value = s.value;
-            if (s.value === state.ws.status) o.selected = true;
-            statusSelect.appendChild(o);
-        });
-        statusSelect.addEventListener('change', () => {
-            state.ws.status = statusSelect.value;
-            touch(true);
-        });
-        host.appendChild(fieldRow('Status', statusSelect));
-
-        host.appendChild(fieldRow('Summary', textarea(state.ws.summary, 2, (v) => { state.ws.summary = v; })));
-
-        const liveInput = A.el('input');
-        liveInput.type = 'url';
-        liveInput.placeholder = 'https://…';
-        liveInput.value = state.ws.liveUrl || '';
-        liveInput.addEventListener('input', () => { state.ws.liveUrl = liveInput.value; touch(); });
-        host.appendChild(fieldRow('Live URL', liveInput));
-
-        const boardBlock = A.el('div', 'subsection');
-        boardBlock.appendChild(A.el('div', 'subfield-label', 'Board'));
-        renderBoard(boardBlock);
-        host.appendChild(boardBlock);
-
-        renderMilestones(host);
-
-        // Thinking and design: deliberately big, unstructured boxes.
-        const thinking = A.el('div', 'subsection');
-        thinking.appendChild(A.el('div', 'subfield-label', 'Thinking'));
-        thinking.appendChild(A.el('p', 'hint', 'Open questions, trade-offs, things you decided and why.'));
-        thinking.appendChild(textarea(state.ws.thinking, 10, (v) => { state.ws.thinking = v; }));
-        host.appendChild(thinking);
-
-        const design = A.el('div', 'subsection');
-        design.appendChild(A.el('div', 'subfield-label', 'Design'));
-        design.appendChild(A.el('p', 'hint', 'Architecture, data shapes, UI notes, sketches in words.'));
-        design.appendChild(textarea(state.ws.design, 10, (v) => { state.ws.design = v; }));
-        host.appendChild(design);
-
-        renderLinks(host);
-    }
-
-    // ---------------------------------------------------------------- chrome --
 
     function renderHeader() {
-        const name = state.project?.name || state.detail?.repo?.name || state.repoName || 'Project';
+        const name = projectName();
         document.getElementById('project-title').textContent = name;
-        document.title = `${name} — Admin`;
+        document.title = `${name} — Projects`;
 
         const parts = [];
         if (state.repoName) parts.push(state.repoName);
-        if (state.project && !state.repoName) parts.push(state.project.kind === 'program' ? 'Program' : 'Manual project');
+        else if (state.project) parts.push('Manual project');
         const desc = state.project?.description || state.detail?.repo?.description;
         if (desc) parts.push(desc);
         document.getElementById('project-subtitle').textContent = parts.join(' · ') || '—';
 
+        const theme = document.getElementById('theme-quick');
         const actions = A.clear(document.getElementById('project-actions'));
+        actions.appendChild(indicator);
         if (state.detail?.repo?.html_url) {
-            const gh = A.el('a', 'btn btn-edit btn-small', 'GitHub ↗');
-            gh.href = state.detail.repo.html_url;
-            gh.target = '_blank';
-            gh.rel = 'noopener';
+            const gh = A.externalLink('', state.detail.repo.html_url, 'btn btn-edit btn-small');
+            gh.appendChild(A.icon('github', 14));
+            gh.appendChild(A.el('span', 'btn-label', 'GitHub'));
             actions.appendChild(gh);
         }
-        const live = state.ws?.liveUrl || state.detail?.repo?.homepage;
+        const live = ws()?.liveUrl || state.detail?.repo?.homepage;
         if (live) {
-            const btn = A.el('a', 'btn btn-edit btn-small', 'Live ↗');
-            btn.href = live;
-            btn.target = '_blank';
-            btn.rel = 'noopener';
+            const btn = A.externalLink('', live, 'btn btn-edit btn-small');
+            btn.appendChild(A.icon('external', 14));
+            btn.appendChild(A.el('span', 'btn-label', 'Live'));
             actions.appendChild(btn);
         }
+        A.projectTools(state.id).forEach((t) => {
+            const btn = A.link('', t.href, 'btn btn-add-primary btn-small');
+            btn.title = t.hint || t.label;
+            btn.appendChild(A.icon(t.icon || 'pencil', 14));
+            btn.appendChild(A.el('span', 'btn-label', t.label));
+            actions.appendChild(btn);
+        });
         if (state.project) {
-            actions.appendChild(A.button('Delete', 'btn btn-danger btn-small', () => {
-                A.modal.open({
+            actions.appendChild(A.iconButton('trash', 'Delete project', async () => {
+                const ok = await A.confirm({
                     title: `Delete "${state.project.name}"?`,
-                    description: 'This removes the project and its workspace — next steps, milestones, thinking and design notes. It cannot be undone.',
-                    fields: [],
-                    submitLabel: 'Delete project',
-                    onSubmit: async () => {
-                        await A.api(`/projects?id=${encodeURIComponent(state.id)}`, { method: 'DELETE' });
-                        window.location.href = '../index.html';
-                    },
+                    description: 'This removes the project and its workspace — next steps, achievements, notes — plus their calendar entries. It cannot be undone.',
+                    confirmLabel: 'Delete project', danger: true,
                 });
-            }));
+                if (!ok) return;
+                await A.api(`/projects?id=${encodeURIComponent(state.id)}`, { method: 'DELETE' });
+                window.location.href = 'projects.html';
+            }, 'icon-btn danger'));
         }
+        // nav.js adds the theme toggle once; keep it last.
+        if (theme) actions.appendChild(theme);
+    }
+
+    function renderSidebar() {
+        const others = Object.entries(state.others)
+            .filter(([id, w]) => id !== state.id && w.updatedAt)
+            .sort((a, b) => new Date(b[1].updatedAt) - new Date(a[1].updatedAt))
+            .slice(0, 8);
+        window.Nav.setSections([
+            {
+                label: projectName(),
+                items: [
+                    { label: 'Next steps', icon: 'upnext', href: '#sec-next', count: ws()?.next.length || '' },
+                    { label: 'Achieved', icon: 'check', href: '#sec-achieved', count: ws()?.achieved.length || '' },
+                    { label: 'Notes', icon: 'pencil', href: '#sec-notes' },
+                    { label: 'Details', icon: 'list', href: '#sec-details' },
+                    { label: 'Repository', icon: 'github', href: '#sec-repo' },
+                    ...A.projectTools(state.id).map((t) => ({ label: t.label, icon: t.icon || 'pencil', href: t.href })),
+                ],
+            },
+            {
+                label: 'Recently worked on',
+                empty: 'Nothing else yet.',
+                items: others.map(([id, w]) => ({
+                    label: w.projectName || A.projectLabel(id),
+                    icon: 'projects',
+                    href: A.projectHref(id).replace(/^\.\.\//, ''),
+                    count: w.next?.length || '',
+                })),
+            },
+            {
+                label: 'Projects',
+                items: [
+                    { label: 'All projects', icon: 'projects', href: 'pages/projects.html' },
+                ],
+            },
+        ]);
     }
 
     async function load() {
         const hint = document.getElementById('load-hint');
-        if (!state.id) {
-            hint.textContent = 'No project id in the URL.';
-            return;
-        }
+        if (!state.id) { hint.textContent = 'No project id in the URL.'; return; }
 
         try {
             if (state.id.startsWith('gh:')) {
@@ -540,30 +567,35 @@
             } else {
                 const customList = await A.api('/projects');
                 state.project = customList.find((p) => p.id === state.id) || null;
-                if (!state.project) {
-                    hint.textContent = 'That project no longer exists.';
-                    return;
-                }
+                if (!state.project) { hint.textContent = 'That project no longer exists.'; return; }
                 state.repoName = state.project.repo || null;
             }
 
-            const [ws, detail] = await Promise.all([
-                A.api(`/workspace?id=${encodeURIComponent(state.id)}`),
-                state.repoName
-                    ? A.api(`/repo?repo=${encodeURIComponent(state.repoName)}`).catch(() => null)
-                    : Promise.resolve(null),
+            state.store = A.store.workspace(state.id);
+            const [, detail, plan, others] = await Promise.all([
+                state.store.load(),
+                state.repoName ? A.api(`/repo?repo=${encodeURIComponent(state.repoName)}`).catch(() => null) : Promise.resolve(null),
+                A.store.plan.load().catch(() => ({ roadmaps: [] })),
+                A.api('/workspaces').catch(() => ({})),
             ]);
-
-            state.ws = ws;
             state.detail = detail;
+            state.roadmaps = plan.roadmaps || [];
+            state.others = others;
+
+            // Keep the name on the workspace so calendar events can say which
+            // project a step belongs to.
+            if (ws().projectName !== projectName()) {
+                ws().projectName = projectName();
+                if (ws().updatedAt) save();
+            }
 
             hint.style.display = 'none';
             document.getElementById('app').style.display = '';
-
             renderHeader();
-            renderRepoSide();
             renderWorkspace();
-            setSaveState(ws.updatedAt ? `Saved ${A.relativeTime(ws.updatedAt)}` : 'Nothing saved yet');
+            renderNotes();
+            renderDetails();
+            renderRepoSide();
         } catch (e) {
             hint.textContent = `Could not load this project: ${e.message}`;
         }

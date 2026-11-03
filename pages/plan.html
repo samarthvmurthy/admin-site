@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Plan — Control Panel</title>
+<link rel="icon" type="image/svg+xml" href="../assets/icon.svg">
+<script src="../js/theme.js"></script>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body data-module="plan">
+<div class="shell">
+    <aside class="sidebar" id="sidebar"></aside>
+    <div class="sidebar-overlay" id="sidebar-overlay"></div>
+
+    <div class="content">
+        <header class="topbar">
+            <button class="menu-toggle" id="menu-toggle" aria-label="Open menu"></button>
+            <div class="topbar-title">
+                <h1 id="view-title">Plan</h1>
+                <p id="view-sub">Tasks with due dates, and roadmaps for the long haul.</p>
+            </div>
+            <div class="topbar-actions" id="topbar-actions"></div>
+        </header>
+
+        <main class="narrow" id="main">
+            <p class="hint">Loading your plan…</p>
+        </main>
+    </div>
+</div>
+
+<div class="modal-backdrop" id="modal-backdrop"></div>
+
+<script src="../js/nav.js"></script>
+<script src="../js/common.js"></script>
+<script src="../js/modal.js"></script>
+<script src="../js/store.js"></script>
+<script src="../js/plan.js"></script>
+</body>
+</html>

@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Projects — Control Panel</title>
+<link rel="icon" type="image/svg+xml" href="../assets/icon.svg">
+<script src="../js/theme.js"></script>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body data-module="projects">
+<div class="shell">
+    <aside class="sidebar" id="sidebar"></aside>
+    <div class="sidebar-overlay" id="sidebar-overlay"></div>
+
+    <div class="content">
+        <header class="topbar">
+            <button class="menu-toggle" id="menu-toggle" aria-label="Open menu"></button>
+            <div class="topbar-title">
+                <h1>Projects</h1>
+                <p id="projects-summary">Every repo on your GitHub, plus anything you add by hand.</p>
+            </div>
+            <div class="topbar-actions" id="topbar-actions">
+                <button class="btn btn-add-primary btn-small" id="new-project-btn" type="button">+ <span class="btn-label">New project</span></button>
+            </div>
+        </header>
+
+        <main>
+
+            <div class="toolbar">
+                <input type="search" id="project-search" class="toolbar-search" placeholder="Search projects…" autocomplete="off" aria-label="Search projects">
+                <select id="project-sort" class="toolbar-select" aria-label="Sort projects">
+                    <option value="touched">Recently worked on</option>
+                    <option value="pushed">Recently pushed</option>
+                    <option value="steps">Most next steps</option>
+                    <option value="name">Name A–Z</option>
+                </select>
+            </div>
+
+            <p class="hint" id="projects-hint">Loading your GitHub repositories…</p>
+            <div class="project-grid" id="project-grid"></div>
+        </main>
+    </div>
+</div>
+
+<div class="modal-backdrop" id="modal-backdrop"></div>
+
+<script src="../js/nav.js"></script>
+<script src="../js/common.js"></script>
+<script src="../js/modal.js"></script>
+<script src="../js/store.js"></script>
+<script src="../js/items.js"></script>
+<script src="../js/projects.js"></script>
+</body>
+</html>

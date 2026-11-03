@@ -15,7 +15,12 @@
         return node;
     }
 
+    let onCloseHook = null;
+
     function close() {
+        const hook = onCloseHook;
+        onCloseHook = null;
+        if (hook) setTimeout(hook, 0);
         const node = backdrop();
         node.classList.remove('visible');
         A.clear(node);
@@ -27,7 +32,7 @@
     }
 
     function buildField(field) {
-        const wrap = A.el('div', 'modal-field');
+        const wrap = A.el('div', `modal-field${field.half ? ' half' : ''}${field.type === 'checkbox' ? ' is-check' : ''}`);
         const label = A.el('label', 'modal-label', field.label);
         if (field.required) label.appendChild(A.el('span', 'req', ' *'));
         wrap.appendChild(label);
@@ -71,8 +76,11 @@
     function open(spec) {
         const node = backdrop();
         A.clear(node);
+        onCloseHook = spec.onClose || null;
 
-        const dialog = A.el('div', 'modal');
+        const dialog = A.el('div', `modal${spec.wide ? ' modal-wide' : ''}`);
+        dialog.setAttribute('role', 'dialog');
+        dialog.setAttribute('aria-modal', 'true');
         const head = A.el('div', 'modal-head');
         head.appendChild(A.el('h3', null, spec.title || ''));
         const closeBtn = A.button('✕', 'modal-close', close);
@@ -112,7 +120,7 @@
         }
         footer.appendChild(A.el('div', 'modal-foot-spacer'));
         footer.appendChild(A.button('Cancel', 'btn btn-edit', close));
-        const submit = A.el('button', 'btn btn-add-primary', spec.submitLabel || 'Save');
+        const submit = A.el('button', `btn ${spec.danger ? 'btn-danger-solid' : 'btn-add-primary'}`, spec.submitLabel || 'Save');
         submit.type = 'submit';
         footer.appendChild(submit);
         form.appendChild(footer);
@@ -147,5 +155,18 @@
         if (first) setTimeout(() => first.focus(), 50);
     }
 
-    A.modal = { open, close };
+    // Promise-based yes/no dialog.
+    function confirm({ title, description, confirmLabel = 'Confirm', danger = false }) {
+        return new Promise((resolve) => {
+            let answered = false;
+            open({
+                title, description, fields: [], submitLabel: confirmLabel, danger,
+                onSubmit: () => { answered = true; resolve(true); },
+                onClose: () => { if (!answered) resolve(false); },
+            });
+        });
+    }
+
+    A.modal = { open, close, confirm };
+    A.confirm = confirm;
 })();

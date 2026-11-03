@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Up next — Control Panel</title>
+<link rel="icon" type="image/svg+xml" href="../assets/icon.svg">
+<script src="../js/theme.js"></script>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body data-module="upnext">
+<div class="shell">
+    <aside class="sidebar" id="sidebar"></aside>
+    <div class="sidebar-overlay" id="sidebar-overlay"></div>
+
+    <div class="content">
+        <header class="topbar">
+            <button class="menu-toggle" id="menu-toggle" aria-label="Open menu"></button>
+            <div class="topbar-title">
+                <h1>Up next</h1>
+                <p id="upnext-summary">Everything due, ranked by date and priority.</p>
+            </div>
+            <div class="topbar-actions">
+                <button class="btn btn-edit btn-small" id="refresh-btn" type="button"><span class="btn-label">Refresh</span></button>
+            </div>
+        </header>
+
+        <main class="narrow">
+            <div class="toolbar">
+                <div class="filter-chips" id="kind-filters"></div>
+            </div>
+            <div id="calendar-note"></div>
+            <section class="panel" id="upnext-panel">
+                <p class="hint">Gathering tasks, next steps, milestones and events…</p>
+            </section>
+        </main>
+    </div>
+</div>
+
+<div class="modal-backdrop" id="modal-backdrop"></div>
+
+<script src="../js/nav.js"></script>
+<script src="../js/common.js"></script>
+<script src="../js/modal.js"></script>
+<script src="../js/store.js"></script>
+<script src="../js/items.js"></script>
+<script src="../js/upnext.js"></script>
+</body>
+</html>
