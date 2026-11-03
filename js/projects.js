@@ -273,7 +273,23 @@
         if (!state.reposLoaded && !state.custom.length) return;
         if (!list.length) {
             hint.style.display = '';
-            hint.textContent = state.search ? `Nothing matches "${state.search}".` : 'No projects in this view.';
+            A.clear(hint);
+            const label = VIEWS.find((v) => v.key === state.view)?.label || 'this view';
+            hint.appendChild(document.createTextNode(state.search ? `Nothing matches "${state.search}". ` : `No projects in "${label}" yet. `));
+            if (state.view !== 'all' || state.search) {
+                const reset = A.el('a', 'inline-link', 'Show all projects');
+                reset.href = '#';
+                reset.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    state.view = 'all';
+                    state.search = '';
+                    document.getElementById('project-search').value = '';
+                    savePrefs();
+                    renderSidebar();
+                    renderGrid();
+                });
+                hint.appendChild(reset);
+            }
         } else {
             hint.style.display = 'none';
         }
