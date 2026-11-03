@@ -87,6 +87,10 @@
                 { name: 'time', label: 'Time (optional)', type: 'time', value: task?.time || '', half: true, hint: 'Leave empty for an all-day item.' },
                 { name: 'priority', label: 'Priority', type: 'select', value: task?.priority || 'medium', options: A.PRIORITIES, half: true },
                 { name: 'notes', label: 'Notes', type: 'textarea', rows: 3, value: task?.notes || '' },
+                ...(task?.source ? [{
+                    name: 'onCalendar', label: 'Block this time on my calendar', type: 'checkbox', value: !task.noCalendar,
+                    hint: `Made from an event in ${task.source.calendarName}. Leave off if that event is already at the same time.`,
+                }] : []),
             ],
             submitLabel: editing ? 'Save' : 'Add task',
             destructiveLabel: editing ? 'Delete' : null,
@@ -95,6 +99,7 @@
                 if (v.time && !v.due) throw new Error('Pick a date to go with that time.');
                 const target = task || { id: A.uid(), done: false, createdAt: new Date().toISOString() };
                 Object.assign(target, { title: v.title, due: v.due, time: v.time, priority: v.priority, notes: v.notes });
+                if (target.source) target.noCalendar = !v.onCalendar;
                 if (!editing) plan().tasks.unshift(target);
                 store.save(true);
                 render();
@@ -131,6 +136,7 @@
         main.setAttribute('role', 'button');
         main.appendChild(A.el('span', 'item-title', t.title));
         const subBits = [];
+        if (t.source?.calendarName) subBits.push(`from ${t.source.calendarName}`);
         if (t.notes) subBits.push(t.notes.split('\n')[0]);
         if (t.done && t.doneAt) subBits.push(`done ${A.relativeTime(t.doneAt)}`);
         if (subBits.length) main.appendChild(A.el('span', 'item-sub', subBits.join(' · ')));

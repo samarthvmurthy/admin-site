@@ -699,12 +699,19 @@ function eventWhen(date, time, minutes, timeZone) {
   return { start: { date }, end: { date: addDaysKey(date, 1) } };
 }
 
+function clampMinutes(m) {
+  const n = Number(m);
+  return Number.isFinite(n) && n >= 5 && n <= 1440 ? Math.round(n) : 30;
+}
+
 function cpProps(kind, id, owner) {
   return { private: { cp: '1', cpKind: kind, cpId: id, cpOwner: owner || '' } };
 }
 
 function taskSpec(t, timeZone) {
-  if (!isDateKey(t.due)) return null;
+  // Tasks made from a calendar event at its own time are already on the
+  // calendar; mirroring them would show the event twice.
+  if (!isDateKey(t.due) || t.noCalendar) return null;
   return {
     summary: `${t.done ? '✓' : '○'} ${t.title || 'Untitled task'}`,
     description: [
@@ -712,8 +719,9 @@ function taskSpec(t, timeZone) {
       t.notes || '',
       `Open in Plan: ${SITE_URL}/pages/plan.html`,
     ].filter(Boolean).join('\n\n'),
-    ...eventWhen(t.due, t.time, 30, timeZone),
-    transparency: 'transparent',
+    ...eventWhen(t.due, t.time, clampMinutes(t.duration), timeZone),
+    // A task you scheduled from an event is real time you've set aside.
+    transparency: t.source ? 'opaque' : 'transparent',
     extendedProperties: cpProps('task', t.id, 'plan'),
   };
 }

@@ -32,8 +32,6 @@
             plan: state.plan,
             workspaces: state.workspaces,
             projectNames: projectNames(),
-            events: state.events,
-            reviewDoc: A.store.review.doc,
         });
     }
 
@@ -383,6 +381,7 @@
         state.calendar = { configured: cal.configured };
         state.events = cal.events;
         if (cal.error) A.toast(`Calendar: ${cal.error}`, 'error');
+        if (cal.configured && !cal.error) await A.items.syncAccepted(state.events).catch(() => 0);
 
         renderUpNext();
         renderCalendar();

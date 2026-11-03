@@ -2,8 +2,9 @@
  * Up next: tasks, project next steps, roadmap milestones and the calendar
  * events you've let in, bucketed by when they're due and ranked by priority.
  *
- * Calendar events start in a "To review" list; nothing from Google lands in
- * Up next until you add it (or set a rule for its series or calendar).
+ * Calendar events start in a "To review" list. Adding one opens a scheduling
+ * dialog (with the day's conflicts) and saves it as a Plan task you can tick
+ * off; series and calendar rules add tasks at the events' own times.
  */
 (function () {
     const A = window.Admin;
@@ -14,7 +15,6 @@
         { key: 'task', label: 'Tasks' },
         { key: 'step', label: 'Project steps' },
         { key: 'milestone', label: 'Milestones' },
-        { key: 'event', label: 'Events' },
     ];
 
     const state = {
@@ -24,10 +24,7 @@
     const reviewDoc = () => A.store.review.doc;
 
     function items() {
-        const all = A.items.collect({
-            plan: state.plan, workspaces: state.workspaces, projectNames: state.names,
-            events: state.events, reviewDoc: reviewDoc(),
-        });
+        const all = A.items.collect({ plan: state.plan, workspaces: state.workspaces, projectNames: state.names });
         if (state.filter === 'all') return all;
         if (state.filter === 'milestone') return all.filter((i) => i.kind === 'milestone' || i.kind === 'phase');
         return all.filter((i) => i.kind === state.filter);
@@ -46,6 +43,17 @@
         R.set(reviewDoc(), event, decision, scope);
         A.store.review.save(true);
         render();
+    }
+
+    // After a rule change: create tasks for anything it now lets in.
+    async function applyRules(message) {
+        const created = await A.items.syncAccepted(state.events);
+        render();
+        if (message) A.toast(created ? `${message} — ${created} task${created === 1 ? '' : 's'} added` : message, 'ok');
+    }
+
+    function schedule(event) {
+        A.schedule.open(event, { events: state.events, workspaces: state.workspaces, onDone: render });
     }
 
     function whenLabel(e) {
@@ -70,7 +78,10 @@
         if (e.recurringEventId && !skipped) {
             const series = A.el('span', 'review-series');
             series.appendChild(A.el('span', null, 'Repeats —'));
-            series.appendChild(A.button('add every time', 'link-btn', () => decide(e, 'accept', 'series')));
+            series.appendChild(A.button('add every time', 'link-btn', () => {
+                R.set(reviewDoc(), e, 'accept', 'series');
+                applyRules('Every repeat will be added');
+            }));
             series.appendChild(A.el('span', null, '·'));
             series.appendChild(A.button('always skip', 'link-btn', () => decide(e, 'dismiss', 'series')));
             main.appendChild(series);
@@ -79,16 +90,13 @@
 
         const actions = A.el('div', 'review-actions');
         if (skipped) {
-            actions.appendChild(A.button('Add', 'btn btn-edit btn-small', () => {
-                // Undo whichever rule skipped it, then add this one.
-                if (R.seriesKey(e) && reviewDoc().series?.[R.seriesKey(e)] === 'dismiss') R.set(reviewDoc(), e, null, 'series');
-                decide(e, 'accept', 'event');
-            }));
+            actions.appendChild(A.button('Add…', 'btn btn-edit btn-small', () => schedule(e)));
         } else {
             actions.appendChild(A.button('Skip', 'btn btn-ghost btn-small', () => decide(e, 'dismiss', 'event')));
-            const add = A.button('', 'btn btn-add-primary btn-small', () => decide(e, 'accept', 'event'));
+            const add = A.button('', 'btn btn-add-primary btn-small', () => schedule(e));
+            add.title = 'Choose a time and add it as a task';
             add.appendChild(A.icon('plus', 13));
-            add.appendChild(A.el('span', null, 'Add'));
+            add.appendChild(A.el('span', null, 'Add…'));
             actions.appendChild(add);
         }
         row.appendChild(actions);
@@ -112,11 +120,12 @@
                 A.store.review.save(true);
                 render();
             }));
-            acts.appendChild(A.button('Add all', 'btn btn-edit btn-small', () => {
+            const addAll = A.button('Add all', 'btn btn-edit btn-small', () => {
                 pending.forEach((c) => R.set(reviewDoc(), c.event, 'accept', 'event'));
-                A.store.review.save(true);
-                render();
-            }));
+                applyRules('Added at their calendar times');
+            });
+            addAll.title = 'Add every event as a task at its own time';
+            acts.appendChild(addAll);
         }
         acts.appendChild(A.iconButton('flag', 'Review rules for each calendar', rulesDialog, 'icon-btn sm'));
         head.appendChild(acts);
@@ -125,7 +134,7 @@
         if (!pending.length) {
             host.appendChild(A.el('p', 'hint', 'Nothing new from your calendar. Events from Google wait here until you add them to Up next.'));
         } else {
-            host.appendChild(A.el('p', 'hint', 'From your Google Calendar for the next three weeks. Add the ones you want in Up next; skip the rest.'));
+            host.appendChild(A.el('p', 'hint', 'From your Google Calendar for the next three weeks. Adding one lets you pick a time (with conflicts shown) and turns it into a task you can tick off.'));
             const list = A.el('div', 'row-list');
             pending.forEach((c) => list.appendChild(reviewRow(c, false)));
             host.appendChild(list);
@@ -166,9 +175,7 @@
                 doc.calendars = {};
                 cals.forEach((c) => { if (v[c.id]) doc.calendars[c.id] = v[c.id]; });
                 if (v.__resetSeries) doc.series = {};
-                A.store.review.save(true);
-                render();
-                A.toast('Rules saved', 'ok');
+                applyRules('Rules saved');
             },
         });
     }
@@ -215,10 +222,7 @@
 
             const list = g.key === 'someday' && !state.showSomeday ? g.items.slice(0, 5) : g.items;
             const rows = A.el('div', 'row-list');
-            list.forEach((item) => rows.appendChild(A.items.row(item, {
-                onComplete: refreshFromStore,
-                onRemoveEvent: (it) => { decide(it.event, 'dismiss', 'event'); A.toast('Removed — find it under "Show skipped"'); },
-            })));
+            list.forEach((item) => rows.appendChild(A.items.row(item, { onComplete: refreshFromStore })));
             panel.appendChild(rows);
             if (list.length < g.items.length) {
                 panel.appendChild(A.button(`Show ${g.items.length - list.length} more`, 'btn-add', () => { state.showSomeday = true; render(); }));
@@ -303,6 +307,7 @@
         Object.entries(workspaces).forEach(([id, ws]) => { state.workspaces[id] = A.store.workspace(id).seed(ws); });
         custom.forEach((p) => { state.names[p.id] = p.name; });
         renderCalendarNote();
+        if (state.calendar.configured) await A.items.syncAccepted(state.events);
         render();
 
         A.api('/repos').then((repos) => {
@@ -315,6 +320,7 @@
     document.getElementById('refresh-btn').addEventListener('click', async () => {
         await loadEvents();
         renderCalendarNote();
+        if (state.calendar.configured) await A.items.syncAccepted(state.events);
         render();
         A.toast('Up to date', 'ok');
     });

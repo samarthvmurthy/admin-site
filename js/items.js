@@ -101,7 +101,61 @@
         return out;
     }
 
-    function collect({ plan, workspaces, projectNames = {}, events = [], reviewDoc = null }) {
+    const pad2 = (n) => String(n).padStart(2, '0');
+
+    // A tickable Plan task for a calendar event. `overrides` carries what you
+    // chose in the scheduling dialog; without it the event's own time is used.
+    function taskFromEvent(e, overrides = {}) {
+        const start = A.parseDate(e.start);
+        const end = e.end ? A.parseDate(e.end) : null;
+        const minutes = !e.allDay && end ? Math.max(15, Math.round((end - start) / 60000)) : 60;
+        const today = A.todayKey();
+        let due = A.dateKey(start);
+        if (e.allDay && due < today) due = today; // multi-day event already under way
+        return {
+            id: A.uid(),
+            title: e.summary,
+            notes: e.location ? `Location: ${e.location}` : '',
+            due,
+            time: e.allDay ? '' : `${pad2(start.getHours())}:${pad2(start.getMinutes())}`,
+            duration: minutes,
+            priority: 'medium',
+            done: false,
+            createdAt: new Date().toISOString(),
+            source: { calendarId: e.calendarId, eventId: e.id, calendarName: e.calendarName || 'Calendar' },
+            // Same time as the original event: it's already on your calendar.
+            noCalendar: true,
+            ...overrides,
+        };
+    }
+
+    function linkTask(reviewDoc, e, taskId) {
+        review.set(reviewDoc, e, 'accept', 'event');
+        reviewDoc.events[review.key(e)].taskId = taskId;
+    }
+
+    // Make sure every accepted event (one-off, by series rule or by calendar
+    // rule) has its task. A task you later delete is not recreated.
+    async function syncAccepted(events) {
+        const plan = A.store.plan;
+        const rev = A.store.review;
+        await Promise.all([plan.load(), rev.load()]);
+        let created = 0;
+        candidates(events).forEach(({ event }) => {
+            if (review.decision(rev.doc, event) !== 'accept') return;
+            const rec = rev.doc.events?.[review.key(event)];
+            if (rec?.taskId) return;
+            const existing = plan.doc.tasks.find((t) => t.source?.eventId === event.id && t.source?.calendarId === event.calendarId);
+            const task = existing || taskFromEvent(event);
+            if (!existing) { plan.doc.tasks.push(task); created++; }
+            linkTask(rev.doc, event, task.id);
+        });
+        if (created) plan.save(true);
+        rev.save(true);
+        return created;
+    }
+
+    function collect({ plan, workspaces, projectNames = {} }) {
         const today = A.todayKey();
         const out = [];
 
@@ -109,7 +163,8 @@
             if (t.done) return;
             out.push({
                 key: `task:${t.id}`, kind: 'task', title: t.title, due: t.due || '', time: t.time || '',
-                priority: t.priority || 'medium', context: 'Task', href: 'pages/plan.html', refId: t.id,
+                priority: t.priority || 'medium', context: t.source?.calendarName ? `Task · from ${t.source.calendarName}` : 'Task',
+                href: 'pages/plan.html', refId: t.id,
             });
         });
 
@@ -147,10 +202,8 @@
             });
         });
 
-        // Only events you've let in (mirrors of the items above never count).
-        candidates(events).forEach(({ event, item }) => {
-            if (review.decision(reviewDoc, event) === 'accept') out.push({ ...item, event });
-        });
+        // Calendar events never enter directly: adding one creates a task
+        // (see syncAccepted), so it can be ticked off like everything else.
 
         return out;
     }
@@ -288,7 +341,7 @@
 
     const COMPLETABLE = new Set(['task', 'step', 'milestone']);
 
-    function row(item, { onComplete, onRemoveEvent, showKind = true } = {}) {
+    function row(item, { onComplete, showKind = true } = {}) {
         const r = A.el('div', 'item-row');
 
         if (COMPLETABLE.has(item.kind)) {
@@ -329,14 +382,9 @@
             if (item.kind === 'event' && !item.time) chip.textContent = `${A.dueLabel(item.due)} · all day`;
             meta.appendChild(chip);
         }
-        if (item.kind === 'event' && onRemoveEvent) {
-            const actions = A.el('div', 'item-actions');
-            actions.appendChild(A.iconButton('x', 'Remove from Up next', () => onRemoveEvent(item), 'icon-btn sm danger'));
-            meta.appendChild(actions);
-        }
         r.appendChild(meta);
         return r;
     }
 
-    A.items = { KIND_LABEL, BUCKETS, collect, group, top, fetchEvents, complete, completeStep, reopenStep, row, review, reviewQueue };
+    A.items = { KIND_LABEL, BUCKETS, collect, group, top, fetchEvents, complete, completeStep, reopenStep, row, review, reviewQueue, taskFromEvent, linkTask, syncAccepted };
 })();
