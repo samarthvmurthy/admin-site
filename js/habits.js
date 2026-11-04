@@ -26,7 +26,10 @@
     }
 
     function rate(h, today) {
-        const created = h.createdAt ? A.dateKey(new Date(h.createdAt)) : today;
+        // Count from whichever is earlier: the day the habit was added or the
+        // earliest day ticked, so days filled in after the fact still count.
+        let created = h.createdAt ? A.dateKey(new Date(h.createdAt)) : today;
+        Object.keys(h.log || {}).forEach((d) => { if (h.log[d] && d < created) created = d; });
         const span = Math.max(1, Math.min(30, A.daysBetween(created, today) + 1));
         let done = 0;
         for (let i = 0; i < span; i++) if (h.log?.[A.addDays(today, -i)]) done++;
@@ -36,6 +39,7 @@
     function mount(host, { rangeHost, subHost } = {}) {
         const store = A.store.habits;
         let range = readRange();
+        let offset = 0; // days the visible window ends before today; page back to edit older records
         let newColor = COLORS[0];
 
         function save() { store.save(); }
@@ -75,6 +79,7 @@
             RANGES.forEach((r) => {
                 rangeHost.appendChild(A.button(`${r}d`, r === range ? 'on' : '', () => {
                     range = r;
+                    offset = 0;
                     try { localStorage.setItem(RANGE_KEY, String(r)); } catch { /* ignore */ }
                     renderRange();
                     render();
@@ -82,12 +87,31 @@
             });
         }
 
+        // ‹ Earlier · Oct 6 – Oct 19 · Later › — pages the grid so any past day can be ticked or unticked.
+        function pager(days) {
+            const fmt = (d) => A.parseDate(d).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+            const bar = A.el('div', 'habit-pager');
+            const prev = A.button('', 'btn btn-ghost btn-small', () => { offset += range; render(); });
+            prev.innerHTML = `${window.Nav.svg('chevronLeft', 13)} Earlier`;
+            prev.setAttribute('aria-label', `Show the ${range} days before`);
+            const next = A.button('', 'btn btn-ghost btn-small', () => { offset = Math.max(0, offset - range); render(); });
+            next.innerHTML = `Later ${window.Nav.svg('chevronRight', 13)}`;
+            next.setAttribute('aria-label', `Show the ${range} days after`);
+            next.disabled = offset === 0;
+            bar.appendChild(prev);
+            bar.appendChild(A.el('span', 'habit-pager-label', `${fmt(days[0])} – ${fmt(days[days.length - 1])}`));
+            bar.appendChild(next);
+            if (offset > 0) bar.appendChild(A.button('Today', 'btn btn-ghost btn-small', () => { offset = 0; render(); }));
+            return bar;
+        }
+
         function render() {
             A.clear(host);
             const habits = store.doc?.habits || [];
             const today = A.todayKey();
+            const end = A.addDays(today, -offset);
             const days = [];
-            for (let i = range - 1; i >= 0; i--) days.push(A.addDays(today, -i));
+            for (let i = range - 1; i >= 0; i--) days.push(A.addDays(end, -i));
 
             if (subHost) {
                 const doneToday = habits.filter((h) => h.log?.[today]).length;
@@ -97,6 +121,7 @@
             }
 
             if (habits.length) {
+                host.appendChild(pager(days));
                 const wrap = A.el('div', 'habits-wrap');
                 const table = A.el('table', 'habit-grid');
                 const thead = A.el('thead');

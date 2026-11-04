@@ -852,6 +852,9 @@ a.stat:hover { outline: 1px solid var(--border-strong); }
 }
 .color-dot.on { border-color: var(--hc); }
 .habit-range { margin-left: auto; }
+.habit-pager { display: flex; align-items: center; gap: 0.45rem; margin-bottom: 0.55rem; flex-wrap: wrap; }
+.habit-pager .btn { display: inline-flex; align-items: center; gap: 0.25rem; }
+.habit-pager-label { font-size: 0.8rem; font-weight: 650; color: var(--text-dim); font-variant-numeric: tabular-nums; min-width: 8.5rem; text-align: center; }
 
 /* =====================================================================
    Plan
