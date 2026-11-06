@@ -372,7 +372,7 @@
             A.api('/workspaces').catch(() => ({})),
             A.api('/projects').catch(() => []),
             A.items.fetchEvents(8),
-            A.store.review.load().catch(() => A.store.review.seed({ events: {}, series: {}, calendars: {} })),
+            A.store.review.load().catch(() => A.store.review.fallback({ events: {}, series: {}, calendars: {} })),
         ]);
 
         state.plan = plan || { tasks: [], roadmaps: [] };

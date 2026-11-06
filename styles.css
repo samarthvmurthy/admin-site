@@ -585,6 +585,7 @@ select.toolbar-select { width: auto; flex: 0 0 auto; }
 .save-indicator.saving { color: var(--accent); }
 .save-indicator.saved { color: var(--ok); }
 .save-indicator.error { color: var(--danger); font-weight: 600; }
+.save-indicator.held { color: var(--warn); font-weight: 600; }
 
 .progress-wrap { display: flex; align-items: center; gap: 0.55rem; }
 .progress-track { flex: 1; height: 6px; border-radius: 999px; background: var(--surface-2); overflow: hidden; }
@@ -1404,7 +1405,7 @@ input.modal-checkbox { width: auto; }
 body > .toast { position: fixed; top: 1rem; right: 1rem; z-index: 999; }
 
 /* Anchored sections shouldn't hide under the sticky top bar. */
-[id^="panel-"], [id^="sec-"], [id^="group-"], [id^="phase-"], #habits { scroll-margin-top: 5.5rem; }
+[id^="panel-"], [id^="sec-"], [id^="group-"], [id^="phase-"], #habits, #milestones-panel, #review-panel { scroll-margin-top: 5.5rem; }
 .ptile-meta .inline-link { font-size: inherit; font-weight: 600; }
 
 /* ---- Up next: calendar review ---- */
@@ -1465,3 +1466,65 @@ body > .toast { position: fixed; top: 1rem; right: 1rem; z-index: 999; }
     backdrop-filter: blur(2px);
 }
 .dt-proposed.clash { background: var(--danger-soft); border-color: var(--danger); box-shadow: none; }
+
+/* ---- Up next: layout ---- */
+main.upnext-main { max-width: 1180px; }
+.upnext-layout { display: grid; grid-template-columns: minmax(0, 1fr) 21rem; gap: 1.25rem; align-items: start; }
+.upnext-layout .panel { margin-bottom: 0; }
+.upnext-rail { display: flex; flex-direction: column; gap: 1.25rem; min-width: 0; }
+.upnext-rail .review-row { flex-wrap: wrap; }
+.upnext-rail .review-actions { width: 100%; justify-content: flex-end; }
+#upnext-panel .panel-head { margin-bottom: 0.9rem; }
+@media (max-width: 1100px) {
+    .upnext-layout { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* ---- Up next: milestones ---- */
+.ms-list { display: flex; flex-direction: column; gap: 0.55rem; }
+.ms-list:empty { display: none; }
+.ms-card { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0.65rem 0.7rem; background: var(--bg-alt); }
+.ms-card.ready { border-color: var(--ok); }
+.ms-card.is-done .ms-title { color: var(--text-faint); text-decoration: line-through; }
+.ms-head { display: flex; align-items: flex-start; gap: 0.55rem; }
+.ms-head .check { margin-top: 0.1rem; }
+.ms-head .due-chip { flex-shrink: 0; }
+.ms-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0.1rem; color: inherit; text-decoration: none; }
+.ms-main:hover .ms-title { color: var(--accent); }
+.ms-title { font-size: 0.88rem; font-weight: 600; overflow-wrap: anywhere; }
+.ms-context { font-size: 0.72rem; color: var(--text-dim); overflow-wrap: anywhere; }
+.ms-foot { display: flex; align-items: center; gap: 0.6rem; margin: 0.45rem 0 0 1.7rem; min-height: 1.3rem; }
+.ms-foot .progress-wrap { flex: 1; min-width: 0; }
+.ms-foot .link-btn { font-size: 0.74rem; flex-shrink: 0; color: var(--ok); }
+.ms-toggle {
+    display: inline-flex; align-items: center; gap: 0.25rem; flex-shrink: 0;
+    background: transparent; padding: 0; min-height: 0;
+    font-size: 0.74rem; font-weight: 600; color: var(--text-dim);
+}
+.ms-toggle:hover { color: var(--text); }
+.ms-toggle .inline-icon { display: inline-grid; transition: transform 0.12s ease; }
+.ms-toggle.open .inline-icon { transform: rotate(90deg); }
+.ms-card > .subtasks { margin: 0.4rem 0 0 1.7rem; }
+.ms-phases-head { margin-top: 1rem; }
+
+/* ---- Subtasks (Up next and the Plan page) ---- */
+.subtask-list { display: flex; flex-direction: column; }
+.subtask { display: flex; align-items: center; gap: 0.45rem; }
+.subtask .check { width: 0.95rem; height: 0.95rem; }
+.subtask .icon-btn { opacity: 0; flex-shrink: 0; }
+.subtask:hover .icon-btn, .subtask:focus-within .icon-btn { opacity: 1; }
+@media (hover: none) { .subtask .icon-btn { opacity: 1; } }
+input.subtask-title {
+    flex: 1; min-width: 0; width: auto; font-size: 0.8rem; padding: 0.2rem 0.3rem;
+    background: transparent; border-color: transparent;
+}
+input.subtask-title:hover { border-color: var(--border); }
+input.subtask-title:focus { border-color: var(--accent); background: var(--bg-alt); }
+.subtask.done input.subtask-title { color: var(--text-faint); text-decoration: line-through; }
+input.subtask-add { margin-top: 0.3rem; font-size: 0.78rem; padding: 0.3rem 0.45rem; }
+.phase-body > .subtasks { margin: 0 2.2rem 0.4rem 1.7rem; }
+.subtask-toggle {
+    display: inline-flex; align-items: center; gap: 0.25rem; flex-shrink: 0;
+    background: transparent; padding: 0.2rem 0.3rem; min-height: 0; border-radius: 5px;
+    font-size: 0.72rem; font-weight: 600; color: var(--text-faint); font-variant-numeric: tabular-nums;
+}
+.subtask-toggle:hover { color: var(--text); background: var(--surface-2); }

@@ -155,6 +155,90 @@
         return created;
     }
 
+    // ---------------------------------------------------------- milestones --
+
+    function subtaskProgress(it) {
+        const list = it.subtasks || [];
+        return { done: list.filter((s) => s.done).length, total: list.length };
+    }
+
+    function milestoneItem(r, ph, it) {
+        return {
+            key: `milestone:${it.id}`, kind: 'milestone', title: it.title, due: it.due || '', time: '',
+            priority: 'medium', context: r.title, phase: ph.title,
+            href: `pages/plan.html#roadmap=${encodeURIComponent(r.id)}`,
+            refId: it.id, ownerId: r.id, ref: it,
+        };
+    }
+
+    // Every open milestone, soonest first, with the undated ones last.
+    function milestones(plan) {
+        const out = [];
+        (plan?.roadmaps || []).forEach((r) => (r.phases || []).forEach((ph) => (ph.items || []).forEach((it) => {
+            if (!it.done) out.push(milestoneItem(r, ph, it));
+        })));
+        return out.sort((a, b) => (a.due || '9999').localeCompare(b.due || '9999'));
+    }
+
+    // Tickable, editable subtasks for a milestone. Updates itself in place so
+    // the add box keeps focus; `onChange` lets the host refresh its progress.
+    // Subtasks have no dates, so they never touch the calendar mirror.
+    function subtaskEditor(it, { onChange } = {}) {
+        const store = A.store.plan;
+        const wrap = A.el('div', 'subtasks');
+        const list = A.el('div', 'subtask-list');
+
+        function changed() {
+            store.save(true);
+            onChange?.();
+        }
+
+        function rowFor(s) {
+            const row = A.el('div', `subtask${s.done ? ' done' : ''}`);
+            row.appendChild(A.checkbox(s.done, (v) => {
+                s.done = v;
+                const next = rowFor(s);
+                row.replaceWith(next);
+                next.querySelector('.check').focus();
+                changed();
+            }, `Mark "${s.title}" ${s.done ? 'not done' : 'done'}`));
+
+            const title = A.el('input', 'subtask-title');
+            title.type = 'text';
+            title.value = s.title;
+            title.setAttribute('aria-label', 'Subtask');
+            title.addEventListener('input', () => { s.title = title.value; store.save(); });
+            title.addEventListener('keydown', (e) => { if (e.key === 'Enter') add.focus(); });
+            row.appendChild(title);
+
+            row.appendChild(A.iconButton('x', 'Remove subtask', () => {
+                it.subtasks = it.subtasks.filter((x) => x.id !== s.id);
+                row.remove();
+                changed();
+            }, 'icon-btn sm danger'));
+            return row;
+        }
+
+        (it.subtasks || []).forEach((s) => list.appendChild(rowFor(s)));
+        wrap.appendChild(list);
+
+        const add = A.el('input', 'inline-add subtask-add');
+        add.type = 'text';
+        add.placeholder = '+ Add a subtask and press Enter';
+        add.setAttribute('aria-label', `Add a subtask to ${it.title}`);
+        add.addEventListener('keydown', (e) => {
+            if (e.key !== 'Enter' || !add.value.trim()) return;
+            const s = { id: A.uid(), title: add.value.trim(), done: false };
+            it.subtasks = [...(it.subtasks || []), s];
+            list.appendChild(rowFor(s));
+            add.value = '';
+            changed();
+        });
+        wrap.appendChild(add);
+        wrap.focusAdd = () => add.focus();
+        return wrap;
+    }
+
     function collect({ plan, workspaces, projectNames = {} }) {
         const today = A.todayKey();
         const out = [];
@@ -172,11 +256,9 @@
             (r.phases || []).forEach((ph) => {
                 (ph.items || []).forEach((it) => {
                     if (it.done || !it.due) return;
-                    out.push({
-                        key: `milestone:${it.id}`, kind: 'milestone', title: it.title, due: it.due, time: '',
-                        priority: 'medium', context: r.title, href: `pages/plan.html#roadmap=${encodeURIComponent(r.id)}`,
-                        refId: it.id, ownerId: r.id,
-                    });
+                    const { done, total } = subtaskProgress(it);
+                    const item = milestoneItem(r, ph, it);
+                    out.push(total ? { ...item, context: `${r.title} · ${done}/${total} subtasks` } : item);
                 });
                 // Flag phases that wrap up within the week.
                 if (ph.end && ph.end >= today && A.daysBetween(today, ph.end) <= 7) {
@@ -386,5 +468,5 @@
         return r;
     }
 
-    A.items = { KIND_LABEL, BUCKETS, collect, group, top, fetchEvents, complete, completeStep, reopenStep, row, review, reviewQueue, taskFromEvent, linkTask, syncAccepted };
+    A.items = { KIND_LABEL, BUCKETS, milestones, subtaskProgress, subtaskEditor, collect, group, top, fetchEvents, complete, completeStep, reopenStep, row, review, reviewQueue, taskFromEvent, linkTask, syncAccepted };
 })();

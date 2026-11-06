@@ -186,7 +186,7 @@ function projectSourceUrl(project) {
 async function fetchLanguagesFor(ownerRepo) {
     if (!ownerRepo) return [];
     try {
-        const res = await fetch(`${API_BASE}/languages?repo=${encodeURIComponent(`${ownerRepo.owner}/${ownerRepo.name}`)}`);
+        const res = await Admin.session.fetch(`${API_BASE}/languages?repo=${encodeURIComponent(`${ownerRepo.owner}/${ownerRepo.name}`)}`);
         if (!res.ok) return [];
         const langBytes = await res.json();
         const total = Object.values(langBytes).reduce((a, b) => a + b, 0) || 1;
@@ -211,7 +211,7 @@ async function autoFetchRepos() {
     const hint = document.getElementById('repo-load-hint');
     hint.textContent = 'Loading your GitHub repositories…';
     try {
-        const res = await fetch(`${API_BASE}/repos`);
+        const res = await Admin.session.fetch(`${API_BASE}/repos`);
         if (!res.ok) throw new Error(`API returned ${res.status}`);
         ownRepos = await res.json();
         hint.textContent = '';
@@ -668,18 +668,44 @@ function renderAll() {
     autoFetchRepos();
 }
 
+// Edits live only in memory until pushed, so back them up before the page
+// leaves for the login. They apply only on top of the version they came from.
+const DRAFT_KEY = 'cp-draft:portfolio';
+
+Admin.session.onLeaving(() => {
+    if (!dirty) return;
+    try { localStorage.setItem(DRAFT_KEY, JSON.stringify({ sha: fileSha, data })); } catch { /* full or blocked */ }
+});
+
+function restoreDraft() {
+    try {
+        const draft = JSON.parse(localStorage.getItem(DRAFT_KEY));
+        localStorage.removeItem(DRAFT_KEY);
+        if (draft?.sha !== fileSha) return false;
+        data = draft.data;
+        return true;
+    } catch {
+        return false;
+    }
+}
+
 async function loadData() {
     document.getElementById('load-hint').textContent = 'Loading data.json...';
     try {
-        const res = await fetch(`${API_BASE}/data`);
+        const res = await Admin.session.fetch(`${API_BASE}/data`);
         if (!res.ok) throw new Error(`API returned ${res.status}`);
         const file = await res.json();
         fileSha = file.sha;
         defaultBranch = file.defaultBranch || 'main';
         data = file.content;
+        const restored = restoreDraft();
 
         document.getElementById('load-hint').textContent = '';
         renderAll();
+        if (restored) {
+            markDirty();
+            toast('Restored changes that hadn\'t been pushed yet', 'ok');
+        }
     } catch (e) {
         document.getElementById('load-hint').textContent = 'Failed to load data.json: ' + e.message;
         toast('Failed to load: ' + e.message, 'error');
@@ -692,7 +718,7 @@ async function pushToGitHub() {
     btn.textContent = 'Pushing...';
     try {
         const message = document.getElementById('commit-message').value || 'Update data.json via admin tool';
-        const res = await fetch(`${API_BASE}/data`, {
+        const res = await Admin.session.fetch(`${API_BASE}/data`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ content: data, message, sha: fileSha, branch: defaultBranch }),

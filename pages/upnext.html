@@ -18,22 +18,32 @@
             <button class="menu-toggle" id="menu-toggle" aria-label="Open menu"></button>
             <div class="topbar-title">
                 <h1>Up next</h1>
-                <p id="upnext-summary">Everything due, ranked by date and priority.</p>
+                <p id="upnext-summary">What's due, and the milestones it's building towards.</p>
             </div>
             <div class="topbar-actions">
                 <button class="btn btn-edit btn-small" id="refresh-btn" type="button"><span class="btn-label">Refresh</span></button>
             </div>
         </header>
 
-        <main class="narrow">
-            <div class="toolbar">
-                <div class="filter-chips" id="kind-filters"></div>
-            </div>
+        <main class="upnext-main">
             <div id="calendar-note"></div>
-            <section class="panel" id="review-panel" style="display:none;"></section>
-            <section class="panel" id="upnext-panel">
-                <p class="hint">Gathering tasks, next steps, milestones and events…</p>
-            </section>
+            <div class="upnext-layout">
+                <section class="panel" id="upnext-panel">
+                    <div class="panel-head">
+                        <h2>Tasks</h2>
+                        <div class="panel-head-actions filter-chips" id="kind-filters"></div>
+                    </div>
+                    <div id="upnext-list">
+                        <p class="hint">Gathering tasks, next steps and events…</p>
+                    </div>
+                </section>
+                <div class="upnext-rail">
+                    <section class="panel" id="milestones-panel">
+                        <p class="hint">Gathering milestones…</p>
+                    </section>
+                    <section class="panel" id="review-panel" style="display:none;"></section>
+                </div>
+            </div>
         </main>
     </div>
 </div>

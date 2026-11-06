@@ -1,6 +1,7 @@
 /**
- * Up next: tasks, project next steps, roadmap milestones and the calendar
- * events you've let in, bucketed by when they're due and ranked by priority.
+ * Up next: tasks, project next steps and the calendar events you've let in,
+ * bucketed by when they're due and ranked by priority. Roadmap milestones sit
+ * apart in their own column, each with its subtasks.
  *
  * Calendar events start in a "To review" list. Adding one opens a scheduling
  * dialog (with the day's conflicts) and saves it as a Plan task you can tick
@@ -11,23 +12,23 @@
     const R = A.items.review;
 
     const FILTERS = [
-        { key: 'all', label: 'Everything' },
+        { key: 'all', label: 'All' },
         { key: 'task', label: 'Tasks' },
         { key: 'step', label: 'Project steps' },
-        { key: 'milestone', label: 'Milestones' },
     ];
 
     const state = {
         filter: 'all', plan: null, workspaces: {}, names: {}, events: [], calendar: null,
-        calendars: [], showSomeday: false, showSkipped: false,
+        calendars: [], showSomeday: false, showSkipped: false, showUndated: false,
+        subtasksOpen: new Map(), // milestone id → open or closed, once you've chosen
     };
     const reviewDoc = () => A.store.review.doc;
 
+    const collected = () => A.items.collect({ plan: state.plan, workspaces: state.workspaces, projectNames: state.names });
+
     function items() {
-        const all = A.items.collect({ plan: state.plan, workspaces: state.workspaces, projectNames: state.names });
-        if (state.filter === 'all') return all;
-        if (state.filter === 'milestone') return all.filter((i) => i.kind === 'milestone' || i.kind === 'phase');
-        return all.filter((i) => i.kind === state.filter);
+        const all = collected().filter((i) => i.kind !== 'milestone' && i.kind !== 'phase');
+        return state.filter === 'all' ? all : all.filter((i) => i.kind === state.filter);
     }
 
     function refreshFromStore() {
@@ -180,6 +181,119 @@
         });
     }
 
+    // --------------------------------------------------------- milestones --
+
+    function subtasksStartOpen(item) {
+        const { done, total } = A.items.subtaskProgress(item.ref);
+        return done < total && Boolean(item.due) && A.daysBetween(A.todayKey(), item.due) <= 7;
+    }
+
+    function milestoneCard(item) {
+        const it = item.ref;
+        const card = A.el('article', 'ms-card');
+
+        const head = A.el('div', 'ms-head');
+        head.appendChild(A.checkbox(false, async () => {
+            card.classList.add('is-done');
+            head.querySelector('.check').classList.add('on');
+            try {
+                if (await A.items.complete(item)) {
+                    A.toast(`Done: ${item.title}`, 'ok');
+                    setTimeout(refreshFromStore, 350);
+                }
+            } catch (e) {
+                card.classList.remove('is-done');
+                A.toast(e.message, 'error');
+            }
+        }, `Mark "${item.title}" done`));
+
+        const main = A.el('a', 'ms-main');
+        main.href = A.pageHref(item.href);
+        main.appendChild(A.el('span', 'ms-title', item.title));
+        main.appendChild(A.el('span', 'ms-context', `${item.context} · ${item.phase}`));
+        head.appendChild(main);
+        const chip = A.dueChip(item.due);
+        if (chip) head.appendChild(chip);
+        card.appendChild(head);
+
+        const open = () => state.subtasksOpen.get(it.id) ?? subtasksStartOpen(item);
+        const editor = A.items.subtaskEditor(it, { onChange: () => { renderFoot(); renderSidebar(); } });
+        editor.hidden = !open();
+        const foot = A.el('div', 'ms-foot');
+
+        function renderFoot() {
+            A.clear(foot);
+            const { done, total } = A.items.subtaskProgress(it);
+            const toggle = A.button('', `ms-toggle${open() ? ' open' : ''}`, () => {
+                const next = !open();
+                state.subtasksOpen.set(it.id, next);
+                editor.hidden = !next;
+                renderFoot();
+                if (next) editor.focusAdd();
+            });
+            toggle.setAttribute('aria-expanded', String(open()));
+            toggle.appendChild(A.icon(total ? 'chevronRight' : 'plus', 13));
+            toggle.appendChild(A.el('span', null, total ? 'Subtasks' : 'Add subtasks'));
+            foot.appendChild(toggle);
+            if (total) foot.appendChild(A.progressBar(done, total));
+            if (total && done === total) {
+                card.classList.add('ready');
+                foot.appendChild(A.button('Mark done', 'link-btn', () => head.querySelector('.check').click()));
+            } else {
+                card.classList.remove('ready');
+            }
+        }
+        renderFoot();
+        card.appendChild(foot);
+        card.appendChild(editor);
+        return card;
+    }
+
+    function renderMilestones() {
+        const panel = document.getElementById('milestones-panel');
+        // Never pull a subtask box out from under someone typing in it.
+        if (panel.contains(document.activeElement) && document.activeElement.tagName === 'INPUT') return;
+
+        A.clear(panel);
+        const all = A.items.milestones(state.plan);
+        const dated = all.filter((m) => m.due);
+        const undated = all.filter((m) => !m.due);
+
+        const head = A.el('div', 'panel-head');
+        const h2 = A.el('h2', null, 'Milestones');
+        h2.appendChild(A.el('span', 'badge', String(all.length)));
+        head.appendChild(h2);
+        const acts = A.el('div', 'panel-head-actions');
+        acts.appendChild(A.link('Roadmaps', 'pages/plan.html#roadmaps', 'inline-link'));
+        head.appendChild(acts);
+        panel.appendChild(head);
+
+        if (!all.length) {
+            panel.appendChild(A.el('p', 'hint', 'No open milestones. Add them to a phase of a roadmap in Plan.'));
+        }
+
+        const cards = A.el('div', 'ms-list');
+        dated.forEach((m) => cards.appendChild(milestoneCard(m)));
+        if (state.showUndated) undated.forEach((m) => cards.appendChild(milestoneCard(m)));
+        panel.appendChild(cards);
+
+        if (undated.length) {
+            panel.appendChild(A.button(
+                state.showUndated ? 'Hide milestones without a date' : `Show ${undated.length} without a date`,
+                'link-btn review-toggle',
+                () => { state.showUndated = !state.showUndated; renderMilestones(); },
+            ));
+        }
+
+        const wrapping = collected().filter((i) => i.kind === 'phase').sort((a, b) => a.due.localeCompare(b.due));
+        if (wrapping.length) {
+            panel.appendChild(A.el('div', 'group-head ms-phases-head', 'Phases ending soon'));
+            const rows = A.el('div', 'row-list');
+            wrapping.forEach((p) => rows.appendChild(A.items.row(p, { showKind: false })));
+            panel.appendChild(rows);
+        }
+    }
+
     // --------------------------------------------------------------- list --
 
     function renderFilters() {
@@ -194,20 +308,24 @@
     }
 
     function renderList() {
-        const panel = A.clear(document.getElementById('upnext-panel'));
+        const panel = A.clear(document.getElementById('upnext-list'));
         const groups = A.items.group(items());
         const total = groups.reduce((n, g) => n + g.items.length, 0);
         const overdue = groups[0].items.length;
         const today = groups[1].items.length;
 
-        document.getElementById('upnext-summary').textContent = total
-            ? [overdue ? `${overdue} overdue` : '', `${today} today`, `${total} in total`].filter(Boolean).join(' · ')
-            : 'Nothing due.';
+        const milestoneCount = A.items.milestones(state.plan).length;
+        document.getElementById('upnext-summary').textContent = [
+            overdue ? `${overdue} overdue` : '',
+            total ? `${today} today` : '',
+            total ? `${total} task${total === 1 ? '' : 's'}` : 'No tasks due',
+            milestoneCount ? `${milestoneCount} milestone${milestoneCount === 1 ? '' : 's'}` : '',
+        ].filter(Boolean).join(' · ');
 
         if (!total) {
             const empty = A.el('div', 'empty-state');
             empty.appendChild(A.el('strong', null, 'All clear'));
-            empty.appendChild(document.createTextNode('Add tasks in Plan, next steps on a project, or events from the review list above.'));
+            empty.appendChild(document.createTextNode('Add tasks in Plan, next steps on a project, or events from the review list.'));
             panel.appendChild(empty);
         }
 
@@ -228,10 +346,11 @@
                 panel.appendChild(A.button(`Show ${g.items.length - list.length} more`, 'btn-add', () => { state.showSomeday = true; render(); }));
             }
         });
-        return groups;
     }
 
-    function renderSidebar(groups) {
+    function renderSidebar() {
+        const groups = A.items.group(items());
+        const open = A.items.milestones(state.plan);
         const pending = state.calendar?.configured ? A.items.reviewQueue(state.events, reviewDoc()).pending.length : 0;
         window.Nav.setSections([
             ...(state.calendar?.configured ? [{
@@ -252,9 +371,14 @@
                 })),
             },
             {
+                label: 'Milestones',
+                items: [{ label: 'All milestones', icon: 'target', href: '#milestones-panel', count: open.length || '' }],
+            },
+            {
                 label: 'Add',
                 items: [
                     { label: 'New task', icon: 'plus', href: 'pages/plan.html#view=all' },
+                    { label: 'Milestone', icon: 'map', href: 'pages/plan.html#roadmaps' },
                     { label: 'Project next step', icon: 'projects', href: 'pages/projects.html' },
                     { label: 'Calendar event', icon: 'calendar', href: 'pages/calendar.html' },
                 ],
@@ -263,8 +387,10 @@
     }
 
     function render() {
+        renderList();
+        renderMilestones();
         renderReview();
-        renderSidebar(renderList());
+        renderSidebar();
     }
 
     function renderCalendarNote() {
@@ -300,14 +426,14 @@
             A.store.plan.load().catch(() => ({ tasks: [], roadmaps: [] })),
             A.api('/workspaces').catch(() => ({})),
             A.api('/projects').catch(() => []),
-            A.store.review.load().catch(() => A.store.review.seed({ events: {}, series: {}, calendars: {} })),
+            A.store.review.load().catch(() => A.store.review.fallback({ events: {}, series: {}, calendars: {} })),
             loadEvents(),
         ]);
         state.plan = plan;
         Object.entries(workspaces).forEach(([id, ws]) => { state.workspaces[id] = A.store.workspace(id).seed(ws); });
         custom.forEach((p) => { state.names[p.id] = p.name; });
         renderCalendarNote();
-        if (state.calendar.configured) await A.items.syncAccepted(state.events);
+        if (state.calendar.configured) await A.items.syncAccepted(state.events).catch(() => 0);
         render();
 
         A.api('/repos').then((repos) => {

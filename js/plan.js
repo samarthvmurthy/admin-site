@@ -473,6 +473,9 @@
         return input;
     }
 
+    // Milestones whose subtask list is open; survives this page's re-renders.
+    const openSubtasks = new Set();
+
     function phaseCard(r, p, index) {
         const today = A.todayKey();
         const done = phaseDone(p);
@@ -519,6 +522,23 @@
             const text = textField(it.title, '', 'Milestone', (v) => { it.title = v; });
             text.setAttribute('aria-label', 'Milestone');
             row.appendChild(text);
+            const toggle = A.button('', 'subtask-toggle', () => {
+                const open = !openSubtasks.has(it.id);
+                if (open) openSubtasks.add(it.id); else openSubtasks.delete(it.id);
+                subtasks.hidden = !open;
+                if (open) subtasks.focusAdd();
+            });
+            const toggleLabel = () => {
+                const { done, total } = A.items.subtaskProgress(it);
+                A.clear(toggle).appendChild(A.icon('list', 13));
+                if (total) toggle.appendChild(A.el('span', null, `${done}/${total}`));
+                toggle.title = total ? `Subtasks: ${done} of ${total} done` : 'Add subtasks';
+                toggle.setAttribute('aria-label', toggle.title);
+            };
+            toggleLabel();
+            const subtasks = A.items.subtaskEditor(it, { onChange: toggleLabel });
+            subtasks.hidden = !openSubtasks.has(it.id);
+            row.appendChild(toggle);
             row.appendChild(dateField(it.due, 'Milestone due date', (v) => { it.due = v; }));
             row.appendChild(A.iconButton('x', 'Remove milestone', () => {
                 p.items = p.items.filter((x) => x.id !== it.id);
@@ -526,6 +546,7 @@
                 render();
             }, 'icon-btn sm danger'));
             body.appendChild(row);
+            body.appendChild(subtasks);
         });
 
         const add = A.el('input', 'inline-add');

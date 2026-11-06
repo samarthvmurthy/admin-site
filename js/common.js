@@ -11,8 +11,105 @@ window.Admin = (function () {
 
     // ------------------------------------------------------------- network --
 
+    // The site sits behind Cloudflare Access, whose sessions end at a fixed
+    // time. After that, /api answers with a redirect to the login page. A
+    // fetch that follows it dies on CORS with a bare "Failed to fetch", so
+    // redirects are never followed. An expired session sends the whole page
+    // to the login instead, which returns here afterwards; unsaved edits wait
+    // in localStorage and are restored on the way back (see store.js).
+    const session = (function () {
+        const CHECK_EVERY = 5 * 60 * 1000;
+        const LOOP_GUARD = 60 * 1000;
+        const GUARD_KEY = 'cp-sign-in-redirect';
+        const backFns = new Set();
+        const leavingFns = new Set();
+        let expired = false;
+        let checking = false;
+        let lastCheck = Date.now();
+
+        function isSignedOut(res) {
+            if (res.type === 'opaqueredirect') return true;
+            // The worker's own errors (including ones relayed from Google or
+            // GitHub) are JSON; a bare 401/403 can only have come from Access.
+            const isJson = (res.headers.get('Content-Type') || '').includes('application/json');
+            return (res.status === 401 || res.status === 403) && !isJson;
+        }
+
+        function goToSignIn() {
+            // A half-filled dialog isn't saved anywhere, so let it finish first.
+            if (document.querySelector('.modal-backdrop.visible')) {
+                setTimeout(goToSignIn, 500);
+                return;
+            }
+            leavingFns.forEach((fn) => fn());
+            // If the page loads but /api still refuses it, reloading again
+            // would only loop.
+            let last = 0;
+            try { last = Number(sessionStorage.getItem(GUARD_KEY)) || 0; } catch { /* blocked */ }
+            if (Date.now() - last < LOOP_GUARD) {
+                toast('Still signed out after signing in. Your changes are kept; try reloading in a minute.', 'error');
+                return;
+            }
+            try { sessionStorage.setItem(GUARD_KEY, String(Date.now())); } catch { /* blocked */ }
+            window.location.reload();
+        }
+
+        function expire() {
+            if (!expired) {
+                expired = true;
+                if (document.querySelector('.modal-backdrop.visible')) toast('Your sign-in expired. You\'ll sign in again when you close this dialog.', 'error');
+                goToSignIn();
+            }
+            const err = new Error('Your sign-in expired.');
+            err.status = 401;
+            err.sessionExpired = true;
+            return err;
+        }
+
+        async function check() {
+            if (checking) return;
+            checking = true;
+            lastCheck = Date.now();
+            try {
+                const res = await fetch(`${API_BASE}/calendar/status`, { redirect: 'manual', cache: 'no-store' });
+                if (isSignedOut(res)) {
+                    expire();
+                } else if (res.ok) {
+                    expired = false;
+                    backFns.forEach((fn) => fn());
+                }
+            } catch {
+                // Offline: says nothing about the session.
+            } finally {
+                checking = false;
+            }
+        }
+
+        function checkIfDue() {
+            if (document.visibilityState === 'visible' && (expired || Date.now() - lastCheck >= CHECK_EVERY)) check();
+        }
+
+        window.addEventListener('focus', checkIfDue);
+        window.addEventListener('online', check);
+        document.addEventListener('visibilitychange', checkIfDue);
+        setInterval(checkIfDue, CHECK_EVERY);
+
+        return {
+            isExpired: () => expired,
+            // Runs after any successful check, to retry what failed earlier.
+            onBack(fn) { backFns.add(fn); },
+            // Runs just before the page leaves for the login: back up edits.
+            onLeaving(fn) { leavingFns.add(fn); },
+            async fetch(url, init = {}) {
+                const res = await window.fetch(url, { ...init, redirect: 'manual' });
+                if (isSignedOut(res)) throw expire();
+                return res;
+            },
+        };
+    })();
+
     async function api(path, options = {}) {
-        const res = await fetch(`${API_BASE}${path}`, {
+        const res = await session.fetch(`${API_BASE}${path}`, {
             ...options,
             headers: { 'Content-Type': 'application/json', 'X-Time-Zone': TIME_ZONE, ...options.headers },
             body: options.body != null && typeof options.body !== 'string'
@@ -352,7 +449,7 @@ window.Admin = (function () {
     }
 
     return {
-        API_BASE, TIME_ZONE, api, el, clear, icon, toast, button, iconButton, link, externalLink,
+        API_BASE, TIME_ZONE, session, api, el, clear, icon, toast, button, iconButton, link, externalLink,
         checkbox, debounce, uid,
         dateKey, parseDate, addDays, daysBetween, todayKey, startOfWeekKey, dueLabel, dueTone,
         relativeTime, shortDate, timeOfDay, formatTime, greeting,

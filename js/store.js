@@ -8,6 +8,10 @@
  * while another is in flight. That matters because the worker assigns
  * Google event ids during a save, and two overlapping saves would each
  * create an event for the same item.
+ *
+ * A save that can't get through (expired sign-in, no network) keeps its edits
+ * in localStorage. An expired sign-in sends the page to the login, and the
+ * edits are restored and saved when it comes back.
  */
 (function () {
     const A = window.Admin;
@@ -51,14 +55,40 @@
             _timer: null,
             _saving: false,
             _dirty: false,
+            _readOnly: false,
         };
+
+        const draftKey = `cp-draft:${name}`;
+        const writeDraft = d._writeDraft = () => { try { localStorage.setItem(draftKey, JSON.stringify(d.doc)); } catch { /* full or blocked */ } };
+        const clearDraft = () => { try { localStorage.removeItem(draftKey); } catch { /* blocked */ } };
+        function readDraft() {
+            try { return JSON.parse(localStorage.getItem(draftKey)); } catch { return null; }
+        }
+
+        // Take a document from the server, unless edits that never made it are
+        // waiting. They only apply on top of the version they were made from;
+        // if the document has moved on, restoring them would undo newer work.
+        function adopt(data) {
+            d._readOnly = false;
+            d.doc = data;
+            const draft = readDraft();
+            if (!draft) return data;
+            if ((draft.updatedAt || null) === (data.updatedAt || null)) {
+                d.doc = draft;
+                d.save(true);
+                A.toast('Restored changes that hadn\'t saved yet', 'ok');
+            } else {
+                clearDraft();
+                A.toast('Some unsaved changes were dropped: newer changes had been saved since', 'error');
+            }
+            return d.doc;
+        }
 
         d.load = function (force) {
             if (!d._loading || force) {
                 d._loading = A.api(path).then((data) => {
                     delete data.sync;
-                    d.doc = data;
-                    return data;
+                    return adopt(data);
                 }).catch((e) => { d._loading = null; throw e; });
             }
             return d._loading;
@@ -66,8 +96,18 @@
 
         // Use data that was fetched in bulk (e.g. /workspaces) without a refetch.
         d.seed = function (data) {
+            if (d.doc && !d._readOnly) return d.doc;
+            const doc = adopt(data);
+            d._loading = Promise.resolve(doc);
+            return doc;
+        };
+
+        // Stand-in for a document that failed to load, so the page can still
+        // render. It can never be saved: that would overwrite the real one.
+        d.fallback = function (data) {
             if (d.doc) return d.doc;
             d.doc = data;
+            d._readOnly = true;
             d._loading = Promise.resolve(data);
             return data;
         };
@@ -78,7 +118,7 @@
         }
 
         d.save = function (immediate) {
-            if (!d.doc) return;
+            if (!d.doc || d._readOnly) return;
             d._dirty = true;
             setStatus('dirty');
             clearTimeout(d._timer);
@@ -92,6 +132,12 @@
 
         async function run() {
             if (d._saving || !d._dirty) return;
+            if (A.session.isExpired()) {
+                writeDraft();
+                setStatus('held');
+                return;
+            }
+            const alreadyFailing = d.status === 'error';
             d._saving = true;
             d._dirty = false;
             setStatus('saving');
@@ -103,14 +149,22 @@
             try {
                 const saved = await A.api(path, { method: 'PUT', body, keepalive });
                 mergeServerFields(d.doc, saved);
+                clearDraft();
                 setStatus(d._dirty ? 'dirty' : 'saved', { updatedAt: saved.updatedAt });
                 if (saved.sync?.error) emit({ name, status: 'sync-error', error: saved.sync.error });
                 if (saved.sync?.pending) A.calendarSync.kick();
             } catch (e) {
                 failed = true;
                 d._dirty = true;
-                setStatus('error', { error: e });
-                A.toast(`Couldn't save: ${e.message}`, 'error');
+                writeDraft();
+                if (e.sessionExpired) {
+                    setStatus('held');
+                } else {
+                    setStatus('error', { error: e });
+                    if (!alreadyFailing) A.toast(`Couldn't save: ${e.message}`, 'error');
+                    // No status means the network failed, which tends to pass.
+                    if (!e.status) { clearTimeout(d._timer); d._timer = setTimeout(run, 15000); }
+                }
             } finally {
                 d._saving = false;
             }
@@ -130,7 +184,9 @@
 
     // Don't lose the last edit when the tab goes away.
     let unloading = false;
-    function flushAll() { docs.forEach((d) => d.flush()); }
+    function flushAll() { return Promise.all([...docs.values()].map((d) => d.flush())); }
+    A.session.onBack(flushAll);
+    A.session.onLeaving(() => docs.forEach((d) => { if (d._dirty || d._saving) d._writeDraft(); }));
     window.addEventListener('pagehide', () => { unloading = true; flushAll(); });
     document.addEventListener('visibilitychange', () => {
         unloading = document.visibilityState === 'hidden';
@@ -166,7 +222,7 @@
     function indicator() {
         const node = A.el('span', 'save-indicator', '');
         node.setAttribute('aria-live', 'polite');
-        const labels = { dirty: 'Unsaved…', saving: 'Saving…', saved: 'Saved', error: 'Not saved' };
+        const labels = { dirty: 'Unsaved…', saving: 'Saving…', saved: 'Saved', error: 'Not saved', held: 'Waiting for sign-in' };
         listeners.add((e) => {
             if (!labels[e.status]) return;
             node.textContent = labels[e.status];
