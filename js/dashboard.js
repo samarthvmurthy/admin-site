@@ -209,6 +209,77 @@
         }
     }
 
+    // --------------------------------------------------------- milestones --
+
+    // Read-only: milestones mark progress and tick themselves off as their
+    // subtasks are done. The work itself lives in Up next.
+    function milestoneSummary(m) {
+        const it = m.ref;
+        const { done, total } = A.items.subtaskProgress(it);
+        const card = A.link('', m.href, 'ms-tile');
+        const top = A.el('div', 'ms-tile-top');
+        top.appendChild(A.el('span', 'ms-tile-title', m.title));
+        const chip = A.dueChip(m.due);
+        if (chip) top.appendChild(chip);
+        card.appendChild(top);
+        card.appendChild(A.el('span', 'ms-tile-context', `${m.context} · ${m.phase}`));
+        if (total) {
+            card.appendChild(A.progressBar(done, total));
+            const next = (it.subtasks || []).filter((s) => !s.done && s.due).sort((a, b) => a.due.localeCompare(b.due))[0];
+            const undated = (it.subtasks || []).filter((s) => !s.done && !s.due).length;
+            const line = next
+                ? `Next: ${next.title} · ${A.dueLabel(next.due)}`
+                : undated ? `${undated} subtask${undated === 1 ? '' : 's'} still need a date` : '';
+            if (line) card.appendChild(A.el('span', 'ms-tile-next', line));
+        } else {
+            card.appendChild(A.el('span', 'ms-tile-next', 'No subtasks yet: break it down in Plan'));
+        }
+        return card;
+    }
+
+    function renderMilestones() {
+        const host = A.clear(document.getElementById('milestones-body'));
+        const sub = document.getElementById('milestones-sub');
+        if (!state.plan) { sub.textContent = 'Loading…'; return; }
+
+        const open = A.items.milestones(state.plan);
+        const reached = A.items.reachedMilestones(state.plan);
+        const total = open.length + reached.length;
+        sub.textContent = total ? `${reached.length} of ${total} reached` : 'Progress markers for your roadmaps';
+
+        if (!total) {
+            host.appendChild(A.el('p', 'hint', 'No milestones yet. Add them to a phase of a roadmap in Plan, then break each into dated subtasks.'));
+            return;
+        }
+
+        if (open.length) {
+            const shown = open.slice(0, 6);
+            const grid = A.el('div', 'ms-tile-grid');
+            shown.forEach((m) => grid.appendChild(milestoneSummary(m)));
+            host.appendChild(grid);
+            if (open.length > shown.length) {
+                host.appendChild(A.link(`${open.length - shown.length} more in Up next →`, 'pages/upnext.html#milestones-panel', 'inline-link'));
+            }
+        } else {
+            host.appendChild(A.el('p', 'hint', 'Every milestone is reached.'));
+        }
+
+        if (reached.length) {
+            const foot = A.el('div', 'tile-foot');
+            foot.appendChild(A.el('span', 'mini-label', 'Reached'));
+            const badges = A.el('div', 'ms-reached-list');
+            reached.forEach((m) => {
+                const badge = A.link('', m.href, 'ms-reached');
+                badge.title = `${m.context} · ${m.phase}`;
+                badge.appendChild(A.icon('check', 12));
+                badge.appendChild(A.el('span', null, m.title));
+                badges.appendChild(badge);
+            });
+            foot.appendChild(badges);
+            host.appendChild(foot);
+        }
+    }
+
     // ----------------------------------------------------------- projects --
 
     function renderProjects() {
@@ -267,6 +338,7 @@
                     { label: 'Projects', href: 'pages/projects.html', icon: 'projects' },
                     { label: 'Calendar', href: 'pages/calendar.html', icon: 'calendar' },
                     { label: 'Jobs', href: 'pages/jobs.html', icon: 'jobs', count: 'soon' },
+                    { label: 'Milestones', href: '#tile-milestones', icon: 'target' },
                     { label: 'Habit tracker', href: '#habits', icon: 'habits' },
                 ],
             },
@@ -290,6 +362,7 @@
         });
         renderUpNext();
         renderPlan();
+        renderMilestones();
         renderProjects();
         renderSidebar();
     }
@@ -360,6 +433,7 @@
     async function load() {
         renderSidebar();
         renderPlan();
+        renderMilestones();
         renderCalendar();
         A.habits.mount(document.getElementById('habits-body'), {
             rangeHost: document.getElementById('habit-range'),
@@ -376,6 +450,7 @@
         ]);
 
         state.plan = plan || { tasks: [], roadmaps: [] };
+        if (plan && A.items.settleMilestones(plan)) A.store.plan.save(true);
         state.custom = custom;
         Object.entries(workspaces).forEach(([id, ws]) => { state.workspaces[id] = A.store.workspace(id).seed(ws); });
         state.calendar = { configured: cal.configured };
@@ -386,6 +461,7 @@
         renderUpNext();
         renderCalendar();
         renderPlan();
+        renderMilestones();
         renderProjects();
         renderSidebar();
 

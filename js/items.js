@@ -6,7 +6,9 @@
  *         priority, context, href, color?, ownerId?, refId }
  *
  * Subtasks are the work; a milestone is only a marker of progress, so
- * collect() returns its open subtasks and never the milestone itself.
+ * collect() returns its open, dated subtasks and never the milestone itself.
+ * A milestone with subtasks is reached exactly when all of them are done
+ * (see settleMilestone); one without subtasks is marked reached by hand.
  */
 (function () {
     const A = window.Admin;
@@ -200,33 +202,55 @@
         return true;
     }
 
-    // Catch milestones whose subtasks were all finished before they counted
-    // towards reaching it. Returns whether any changed.
-    function reachFinishedMilestones(plan) {
+    // Bring every milestone with subtasks in line with them, whichever way it
+    // has drifted (ticked by hand with work left, or finished elsewhere).
+    // Returns whether any changed.
+    function settleMilestones(plan) {
         let changed = false;
-        eachMilestone(plan, (r, ph, it) => {
-            if (!it.done && settleMilestone(it)) changed = true;
-        });
+        eachMilestone(plan, (r, ph, it) => { if (settleMilestone(it)) changed = true; });
         return changed;
     }
 
-    // Tickable, editable subtasks for a milestone. Updates itself in place so
-    // the add box keeps focus; `onChange(settled)` lets the host refresh, and
-    // `settled` says the milestone was reached or reopened as a result.
-    // Subtasks take their milestone's date and have no calendar events.
+    function isLate(it, s) {
+        return Boolean(it.due && s.due && s.due > it.due);
+    }
+
+    // Tickable, editable, dated subtasks for a milestone. Updates itself in
+    // place so inputs keep focus; `onChange(settled)` lets the host refresh,
+    // and `settled` says the milestone was reached or reopened as a result.
+    // Only subtasks with a date show up in Up next (and on the calendar).
     function subtaskEditor(it, { onChange } = {}) {
         const store = A.store.plan;
         const wrap = A.el('div', 'subtasks');
         const list = A.el('div', 'subtask-list');
+        const note = A.el('p', 'subtask-note');
+
+        function renderNote() {
+            const undated = (it.subtasks || []).filter((s) => !s.done && !s.due).length;
+            note.textContent = undated
+                ? `${undated} without a date ${undated === 1 ? "doesn't" : "don't"} show in Up next yet.`
+                : '';
+            note.hidden = !undated;
+        }
 
         function changed() {
             const settled = settleMilestone(it);
+            renderNote();
             store.save(true);
             onChange?.(settled);
         }
 
+        function dateInput(value, label, onSet) {
+            const input = A.el('input', 'subtask-due');
+            input.type = 'date';
+            input.value = value || '';
+            input.setAttribute('aria-label', label);
+            input.addEventListener('change', () => onSet(input.value));
+            return input;
+        }
+
         function rowFor(s) {
-            const row = A.el('div', `subtask${s.done ? ' done' : ''}`);
+            const row = A.el('div', `subtask${s.done ? ' done' : ''}${isLate(it, s) ? ' late' : ''}`);
             row.appendChild(A.checkbox(s.done, (v) => {
                 s.done = v;
                 const next = rowFor(s);
@@ -243,6 +267,15 @@
             title.addEventListener('keydown', (e) => { if (e.key === 'Enter') add.focus(); });
             row.appendChild(title);
 
+            const due = dateInput(s.due, `Due date for "${s.title}"`, (v) => {
+                if (v) s.due = v; else delete s.due;
+                row.classList.toggle('late', isLate(it, s));
+                due.title = isLate(it, s) ? `After the milestone's due date (${A.dueLabel(it.due)})` : '';
+                changed();
+            });
+            if (isLate(it, s)) due.title = `After the milestone's due date (${A.dueLabel(it.due)})`;
+            row.appendChild(due);
+
             row.appendChild(A.iconButton('x', 'Remove subtask', () => {
                 it.subtasks = it.subtasks.filter((x) => x.id !== s.id);
                 row.remove();
@@ -254,19 +287,30 @@
         (it.subtasks || []).forEach((s) => list.appendChild(rowFor(s)));
         wrap.appendChild(list);
 
+        // The add row keeps its date between entries, so a run of subtasks
+        // for the same day is quick to type in.
+        const addRow = A.el('div', 'subtask-add-row');
         const add = A.el('input', 'inline-add subtask-add');
         add.type = 'text';
         add.placeholder = '+ Add a subtask and press Enter';
         add.setAttribute('aria-label', `Add a subtask to ${it.title}`);
+        const addDue = dateInput('', 'Due date for the new subtask', () => {});
+        addDue.title = 'Due date for the new subtask';
         add.addEventListener('keydown', (e) => {
             if (e.key !== 'Enter' || !add.value.trim()) return;
             const s = { id: A.uid(), title: add.value.trim(), done: false };
+            if (addDue.value) s.due = addDue.value;
             it.subtasks = [...(it.subtasks || []), s];
             list.appendChild(rowFor(s));
             add.value = '';
             changed();
         });
-        wrap.appendChild(add);
+        addDue.addEventListener('keydown', (e) => { if (e.key === 'Enter') add.focus(); });
+        addRow.appendChild(add);
+        addRow.appendChild(addDue);
+        wrap.appendChild(addRow);
+        renderNote();
+        wrap.appendChild(note);
         wrap.focusAdd = () => add.focus();
         return wrap;
     }
@@ -283,12 +327,13 @@
             });
         });
 
+        // Each dated, open subtask is a task in its own right. Undated ones
+        // stay with their milestone until you give them a day.
         eachMilestone(plan, (r, ph, it) => {
-            if (it.done) return;
             (it.subtasks || []).forEach((s) => {
-                if (s.done) return;
+                if (s.done || !s.due) return;
                 out.push({
-                    key: `subtask:${s.id}`, kind: 'subtask', title: s.title, due: it.due || '', time: '',
+                    key: `subtask:${s.id}`, kind: 'subtask', title: s.title || 'Untitled subtask', due: s.due, time: '',
                     priority: 'medium', context: `${it.title} · ${r.title}`,
                     href: `pages/plan.html#roadmap=${encodeURIComponent(r.id)}`, refId: s.id, ownerId: r.id, milestoneId: it.id,
                 });
@@ -439,13 +484,19 @@
             plan.save(true);
             return true;
         }
+        // Only a milestone without subtasks is reached by hand; the rest
+        // follow their subtasks.
         if (item.kind === 'milestone') {
             const plan = A.store.plan;
             await plan.load();
-            for (const r of plan.doc.roadmaps) for (const ph of r.phases) for (const it of ph.items) {
-                if (it.id === item.refId) { it.done = true; plan.save(true); return true; }
-            }
-            return false;
+            let found = false;
+            eachMilestone(plan.doc, (r, ph, it) => {
+                if (it.id !== item.refId || (it.subtasks || []).length) return;
+                it.done = true;
+                found = true;
+            });
+            if (found) plan.save(true);
+            return found;
         }
         if (item.kind === 'subtask') {
             const plan = A.store.plan;
@@ -520,5 +571,5 @@
         return r;
     }
 
-    A.items = { KIND_LABEL, BUCKETS, milestones, reachedMilestones, reachFinishedMilestones, phasesEnding, subtaskProgress, subtaskEditor, collect, group, top, fetchEvents, complete, completeStep, reopenStep, row, review, reviewQueue, taskFromEvent, linkTask, syncAccepted };
+    A.items = { KIND_LABEL, BUCKETS, milestones, reachedMilestones, settleMilestone, settleMilestones, phasesEnding, subtaskProgress, subtaskEditor, collect, group, top, fetchEvents, complete, completeStep, reopenStep, row, review, reviewQueue, taskFromEvent, linkTask, syncAccepted };
 })();

@@ -1,7 +1,7 @@
 /**
- * Up next: tasks, project next steps, milestone subtasks and the calendar
- * events you've let in, bucketed by when they're due and ranked by priority.
- * Milestones themselves sit apart as markers of how far you've got.
+ * Up next: tasks, project next steps, dated milestone subtasks and the
+ * calendar events you've let in, bucketed by when they're due and ranked by
+ * priority. Milestones themselves sit apart as markers of how far you've got.
  *
  * Calendar events start in a "To review" list. Adding one opens a scheduling
  * dialog (with the day's conflicts) and saves it as a Plan task you can tick
@@ -437,7 +437,7 @@
             loadEvents(),
         ]);
         state.plan = plan;
-        if (A.items.reachFinishedMilestones(plan)) A.store.plan.save(true);
+        if (A.items.settleMilestones(plan)) A.store.plan.save(true);
         Object.entries(workspaces).forEach(([id, ws]) => { state.workspaces[id] = A.store.workspace(id).seed(ws); });
         custom.forEach((p) => { state.names[p.id] = p.name; });
         renderCalendarNote();

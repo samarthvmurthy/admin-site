@@ -476,6 +476,14 @@
     // Milestones whose subtask list is open; survives this page's re-renders.
     const openSubtasks = new Set();
 
+    // Redraw without losing your place in a subtask list.
+    function refocusAfter(editor, redraw) {
+        const focusables = () => [...document.querySelectorAll(`.subtasks[data-milestone="${editor.dataset.milestone}"] :is(input, button)`)];
+        const index = focusables().indexOf(document.activeElement);
+        redraw();
+        if (index !== -1) (focusables()[index] || focusables().pop())?.focus();
+    }
+
     function phaseCard(r, p, index) {
         const today = A.todayKey();
         const done = phaseDone(p);
@@ -518,7 +526,20 @@
         const body = A.el('div', 'phase-body');
         p.items.forEach((it) => {
             const row = A.el('div', `phase-item${it.done ? ' done' : ''}`);
-            row.appendChild(A.checkbox(it.done, (v) => { it.done = v; store.save(true); render(); }));
+            // With subtasks, the tick follows them; only a milestone without
+            // any is ticked by hand.
+            const makeCheck = () => {
+                const check = A.checkbox(it.done, (v) => { it.done = v; store.save(true); render(); },
+                    it.done ? 'Mark milestone not reached' : 'Mark milestone reached');
+                if ((it.subtasks || []).length) {
+                    check.disabled = true;
+                    check.title = 'Reached automatically when all its subtasks are done';
+                    check.setAttribute('aria-label', `${it.done ? 'Reached' : 'Not reached yet'}: follows its subtasks`);
+                }
+                return check;
+            };
+            let check = makeCheck();
+            row.appendChild(check);
             const text = textField(it.title, '', 'Milestone', (v) => { it.title = v; });
             text.setAttribute('aria-label', 'Milestone');
             row.appendChild(text);
@@ -536,7 +557,19 @@
                 toggle.setAttribute('aria-label', toggle.title);
             };
             toggleLabel();
-            const subtasks = A.items.subtaskEditor(it, { onChange: (settled) => { if (settled) render(); else toggleLabel(); } });
+            const subtasks = A.items.subtaskEditor(it, {
+                onChange: (settled) => {
+                    toggleLabel();
+                    const next = makeCheck();
+                    check.replaceWith(next);
+                    check = next;
+                    row.classList.toggle('done', Boolean(it.done));
+                    // Reaching or reopening a milestone moves the roadmap's
+                    // counts; redraw, then put focus back where it was.
+                    if (settled) refocusAfter(subtasks, render);
+                },
+            });
+            subtasks.dataset.milestone = it.id;
             subtasks.hidden = !openSubtasks.has(it.id);
             row.appendChild(toggle);
             row.appendChild(dateField(it.due, 'Milestone due date', (v) => { it.due = v; }));
@@ -750,6 +783,7 @@
     async function load() {
         try {
             await store.load();
+            if (A.items.settleMilestones(store.doc)) store.save(true);
         } catch (e) {
             A.clear(main).appendChild(A.el('div', 'empty-state', `Couldn't load your plan: ${e.message}`));
             return;

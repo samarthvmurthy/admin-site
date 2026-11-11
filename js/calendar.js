@@ -277,6 +277,7 @@
         task: { label: 'a task in Plan', href: () => 'pages/plan.html#view=all' },
         phase: { label: 'a roadmap phase', href: (e) => `pages/plan.html#roadmap=${encodeURIComponent(e.cpOwner)}` },
         milestone: { label: 'a roadmap milestone', href: (e) => `pages/plan.html#roadmap=${encodeURIComponent(e.cpOwner)}` },
+        subtask: { label: 'a milestone subtask', href: (e) => `pages/plan.html#roadmap=${encodeURIComponent(e.cpOwner)}` },
         step: { label: 'a project next step', href: (e) => `pages/project.html?id=${encodeURIComponent(e.cpOwner)}` },
     };
 

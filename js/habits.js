@@ -15,7 +15,7 @@
             const v = Number(localStorage.getItem(RANGE_KEY));
             if (RANGES.includes(v)) return v;
         } catch { /* storage blocked */ }
-        return window.matchMedia('(max-width: 760px)').matches ? 7 : 14;
+        return 14;
     }
 
     function streak(h, today) {
@@ -25,15 +25,11 @@
         return n;
     }
 
-    function rate(h, today) {
-        // Count from whichever is earlier: the day the habit was added or the
-        // earliest day ticked, so days filled in after the fact still count.
-        let created = h.createdAt ? A.dateKey(new Date(h.createdAt)) : today;
-        Object.keys(h.log || {}).forEach((d) => { if (h.log[d] && d < created) created = d; });
-        const span = Math.max(1, Math.min(30, A.daysBetween(created, today) + 1));
-        let done = 0;
-        for (let i = 0; i < span; i++) if (h.log?.[A.addDays(today, -i)]) done++;
-        return Math.round((done / span) * 100);
+    // Progress over the days on screen: days done ÷ days in the filter. It
+    // follows the 7d/14d/30d choice and whichever stretch you've paged to.
+    function progress(h, days) {
+        const done = days.filter((d) => h.log?.[d]).length;
+        return { done, pct: Math.round((done / days.length) * 100) };
     }
 
     function mount(host, { rangeHost, subHost } = {}) {
@@ -135,7 +131,9 @@
                     hr.appendChild(th);
                 });
                 hr.appendChild(A.el('th', null, 'Streak'));
-                hr.appendChild(A.el('th', null, '30d'));
+                const progHead = A.el('th', null, 'Prog.');
+                progHead.title = `Days done out of the ${range} shown`;
+                hr.appendChild(progHead);
                 thead.appendChild(hr);
                 table.appendChild(thead);
 
@@ -178,7 +176,10 @@
                     st.appendChild(A.el('span', `habit-streak${s >= 3 ? ' hot' : ''}`, s ? `${s} day${s === 1 ? '' : 's'}` : '—'));
                     tr.appendChild(st);
                     const rt = A.el('td');
-                    rt.appendChild(A.el('span', 'habit-rate', `${rate(h, today)}%`));
+                    const prog = progress(h, days);
+                    const pct = A.el('span', 'habit-rate', `${prog.pct}%`);
+                    pct.title = `${prog.done} of ${range} days`;
+                    rt.appendChild(pct);
                     tr.appendChild(rt);
 
                     tbody.appendChild(tr);

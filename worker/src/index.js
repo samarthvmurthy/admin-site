@@ -254,9 +254,17 @@ function normalizePlan(body) {
     tasks: arr(body.tasks).filter(withId),
     roadmaps: arr(body.roadmaps).filter(withId).map((r) => ({
       ...r,
-      phases: arr(r.phases).filter(withId).map((p) => ({ ...p, items: arr(p.items).filter(withId) })),
+      phases: arr(r.phases).filter(withId).map((p) => ({ ...p, items: arr(p.items).filter(withId).map(settleMilestone) })),
     })),
   };
+}
+
+// A milestone with subtasks is reached exactly when they're all done, so its
+// calendar tick can never disagree with them, whatever the page sent.
+function settleMilestone(it) {
+  const subtasks = arr(it.subtasks).filter(withId);
+  if (!subtasks.length) return it;
+  return { ...it, subtasks, done: subtasks.every((s) => s.done) };
 }
 
 // The 13-week SWE prep program ships as a seeded roadmap so the Plan page is
@@ -636,8 +644,8 @@ function shapeEvent(e) {
 
 // ------------------------------------------------ Control Panel calendar ----
 //
-// Everything with a date on this site (tasks, roadmap phases and milestones,
-// project next steps) is mirrored into a dedicated Google calendar, so it
+// Everything with a date on this site (tasks, roadmap phases, milestones and
+// their subtasks, project next steps) is mirrored into a dedicated Google calendar, so it
 // shows up on your phone and can be hidden or recoloured in Google as one
 // unit. Items remember their event id and a hash of what was last written,
 // so a save only touches Google for items that actually changed.
@@ -752,6 +760,19 @@ function milestoneSpec(r, ph, it) {
   };
 }
 
+// Dated subtasks are the day-to-day work of a milestone.
+function subtaskSpec(r, it, s) {
+  if (!isDateKey(s.due)) return null;
+  return {
+    summary: `${s.done ? '✓' : '○'} ${s.title || 'Subtask'} · ${it.title}`,
+    description: `Subtask of ${it.title} (${r.title})\n\nRoadmap: ${SITE_URL}/pages/plan.html#roadmap=${enc(r.id)}`,
+    start: { date: s.due },
+    end: { date: addDaysKey(s.due, 1) },
+    transparency: 'transparent',
+    extendedProperties: cpProps('subtask', s.id, r.id),
+  };
+}
+
 function stepSpec(ws, projectId, s, done) {
   if (!isDateKey(s.due)) return null;
   const project = ws.projectName || projectId.replace(/^gh:[^/]+\/|^custom:/, '');
@@ -775,7 +796,10 @@ function planEntries(doc) {
   for (const r of arr(doc.roadmaps)) {
     for (const ph of arr(r.phases)) {
       out.push([ph, phaseSpec(r, ph)]);
-      for (const it of arr(ph.items)) out.push([it, milestoneSpec(r, ph, it)]);
+      for (const it of arr(ph.items)) {
+        out.push([it, milestoneSpec(r, ph, it)]);
+        for (const s of arr(it.subtasks)) if (withId(s)) out.push([s, subtaskSpec(r, it, s)]);
+      }
     }
   }
   return out;
