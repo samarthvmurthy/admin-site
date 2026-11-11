@@ -1483,18 +1483,15 @@ main.upnext-main { max-width: 1180px; }
 .ms-list { display: flex; flex-direction: column; gap: 0.55rem; }
 .ms-list:empty { display: none; }
 .ms-card { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0.65rem 0.7rem; background: var(--bg-alt); }
-.ms-card.ready { border-color: var(--ok); }
-.ms-card.is-done .ms-title { color: var(--text-faint); text-decoration: line-through; }
 .ms-head { display: flex; align-items: flex-start; gap: 0.55rem; }
-.ms-head .check { margin-top: 0.1rem; }
 .ms-head .due-chip { flex-shrink: 0; }
 .ms-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0.1rem; color: inherit; text-decoration: none; }
 .ms-main:hover .ms-title { color: var(--accent); }
 .ms-title { font-size: 0.88rem; font-weight: 600; overflow-wrap: anywhere; }
 .ms-context { font-size: 0.72rem; color: var(--text-dim); overflow-wrap: anywhere; }
-.ms-foot { display: flex; align-items: center; gap: 0.6rem; margin: 0.45rem 0 0 1.7rem; min-height: 1.3rem; }
+.ms-foot { display: flex; align-items: center; gap: 0.6rem; margin-top: 0.45rem; min-height: 1.3rem; }
 .ms-foot .progress-wrap { flex: 1; min-width: 0; }
-.ms-foot .link-btn { font-size: 0.74rem; flex-shrink: 0; color: var(--ok); }
+.ms-reach { font-size: 0.74rem; flex-shrink: 0; margin-left: auto; }
 .ms-toggle {
     display: inline-flex; align-items: center; gap: 0.25rem; flex-shrink: 0;
     background: transparent; padding: 0; min-height: 0;
@@ -1503,7 +1500,17 @@ main.upnext-main { max-width: 1180px; }
 .ms-toggle:hover { color: var(--text); }
 .ms-toggle .inline-icon { display: inline-grid; transition: transform 0.12s ease; }
 .ms-toggle.open .inline-icon { transform: rotate(90deg); }
-.ms-card > .subtasks { margin: 0.4rem 0 0 1.7rem; }
+.ms-card > .subtasks { margin-top: 0.4rem; }
+.ms-reached-list { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-bottom: 0.65rem; }
+.ms-reached {
+    display: inline-flex; align-items: center; gap: 0.3rem; max-width: 100%;
+    padding: 0.18rem 0.5rem 0.18rem 0.4rem; border-radius: 999px;
+    background: var(--ok-soft); color: var(--ok);
+    font-size: 0.72rem; font-weight: 600; text-decoration: none;
+}
+.ms-reached:hover { filter: brightness(1.08); }
+.ms-reached .inline-icon { display: inline-grid; flex-shrink: 0; }
+.ms-reached span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ms-phases-head { margin-top: 1rem; }
 
 /* ---- Subtasks (Up next and the Plan page) ---- */

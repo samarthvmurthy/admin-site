@@ -1,7 +1,7 @@
 /**
- * Up next: tasks, project next steps and the calendar events you've let in,
- * bucketed by when they're due and ranked by priority. Roadmap milestones sit
- * apart in their own column, each with its subtasks.
+ * Up next: tasks, project next steps, milestone subtasks and the calendar
+ * events you've let in, bucketed by when they're due and ranked by priority.
+ * Milestones themselves sit apart as markers of how far you've got.
  *
  * Calendar events start in a "To review" list. Adding one opens a scheduling
  * dialog (with the day's conflicts) and saves it as a Plan task you can tick
@@ -15,6 +15,7 @@
         { key: 'all', label: 'All' },
         { key: 'task', label: 'Tasks' },
         { key: 'step', label: 'Project steps' },
+        { key: 'subtask', label: 'Subtasks' },
     ];
 
     const state = {
@@ -24,10 +25,8 @@
     };
     const reviewDoc = () => A.store.review.doc;
 
-    const collected = () => A.items.collect({ plan: state.plan, workspaces: state.workspaces, projectNames: state.names });
-
     function items() {
-        const all = collected().filter((i) => i.kind !== 'milestone' && i.kind !== 'phase');
+        const all = A.items.collect({ plan: state.plan, workspaces: state.workspaces, projectNames: state.names });
         return state.filter === 'all' ? all : all.filter((i) => i.kind === state.filter);
     }
 
@@ -183,30 +182,14 @@
 
     // --------------------------------------------------------- milestones --
 
-    function subtasksStartOpen(item) {
-        const { done, total } = A.items.subtaskProgress(item.ref);
-        return done < total && Boolean(item.due) && A.daysBetween(A.todayKey(), item.due) <= 7;
-    }
-
+    // A marker of progress, not a to-do: its subtasks are what show up in the
+    // task list, and it's reached when they're done. The list here is only
+    // for adding and tidying them.
     function milestoneCard(item) {
         const it = item.ref;
         const card = A.el('article', 'ms-card');
 
         const head = A.el('div', 'ms-head');
-        head.appendChild(A.checkbox(false, async () => {
-            card.classList.add('is-done');
-            head.querySelector('.check').classList.add('on');
-            try {
-                if (await A.items.complete(item)) {
-                    A.toast(`Done: ${item.title}`, 'ok');
-                    setTimeout(refreshFromStore, 350);
-                }
-            } catch (e) {
-                card.classList.remove('is-done');
-                A.toast(e.message, 'error');
-            }
-        }, `Mark "${item.title}" done`));
-
         const main = A.el('a', 'ms-main');
         main.href = A.pageHref(item.href);
         main.appendChild(A.el('span', 'ms-title', item.title));
@@ -216,14 +199,22 @@
         if (chip) head.appendChild(chip);
         card.appendChild(head);
 
-        const open = () => state.subtasksOpen.get(it.id) ?? subtasksStartOpen(item);
-        const editor = A.items.subtaskEditor(it, { onChange: () => { renderFoot(); renderSidebar(); } });
+        const open = () => state.subtasksOpen.get(it.id) === true;
+        const editor = A.items.subtaskEditor(it, {
+            onChange: (settled) => {
+                renderFoot();
+                renderList();
+                renderSidebar();
+                if (settled) { document.activeElement?.blur(); renderMilestones(); }
+            },
+        });
         editor.hidden = !open();
         const foot = A.el('div', 'ms-foot');
 
         function renderFoot() {
             A.clear(foot);
             const { done, total } = A.items.subtaskProgress(it);
+            if (total) foot.appendChild(A.progressBar(done, total));
             const toggle = A.button('', `ms-toggle${open() ? ' open' : ''}`, () => {
                 const next = !open();
                 state.subtasksOpen.set(it.id, next);
@@ -235,12 +226,13 @@
             toggle.appendChild(A.icon(total ? 'chevronRight' : 'plus', 13));
             toggle.appendChild(A.el('span', null, total ? 'Subtasks' : 'Add subtasks'));
             foot.appendChild(toggle);
-            if (total) foot.appendChild(A.progressBar(done, total));
-            if (total && done === total) {
-                card.classList.add('ready');
-                foot.appendChild(A.button('Mark done', 'link-btn', () => head.querySelector('.check').click()));
-            } else {
-                card.classList.remove('ready');
+            if (!total) {
+                foot.appendChild(A.button('Mark reached', 'link-btn ms-reach', async () => {
+                    if (await A.items.complete(item)) {
+                        A.toast(`Milestone reached: ${item.title}`, 'ok');
+                        refreshFromStore();
+                    }
+                }));
             }
         }
         renderFoot();
@@ -256,20 +248,35 @@
 
         A.clear(panel);
         const all = A.items.milestones(state.plan);
+        const reached = A.items.reachedMilestones(state.plan);
         const dated = all.filter((m) => m.due);
         const undated = all.filter((m) => !m.due);
 
         const head = A.el('div', 'panel-head');
         const h2 = A.el('h2', null, 'Milestones');
-        h2.appendChild(A.el('span', 'badge', String(all.length)));
+        const count = A.el('span', 'badge', `${reached.length}/${all.length + reached.length}`);
+        count.title = `${reached.length} of ${all.length + reached.length} reached`;
+        h2.appendChild(count);
         head.appendChild(h2);
         const acts = A.el('div', 'panel-head-actions');
         acts.appendChild(A.link('Roadmaps', 'pages/plan.html#roadmaps', 'inline-link'));
         head.appendChild(acts);
         panel.appendChild(head);
 
-        if (!all.length) {
-            panel.appendChild(A.el('p', 'hint', 'No open milestones. Add them to a phase of a roadmap in Plan.'));
+        if (!all.length && !reached.length) {
+            panel.appendChild(A.el('p', 'hint', 'No milestones yet. Add them to a phase of a roadmap in Plan.'));
+        }
+
+        if (reached.length) {
+            const badges = A.el('div', 'ms-reached-list');
+            reached.forEach((m) => {
+                const badge = A.link('', m.href, 'ms-reached');
+                badge.title = `${m.context} · ${m.phase}`;
+                badge.appendChild(A.icon('check', 12));
+                badge.appendChild(A.el('span', null, m.title));
+                badges.appendChild(badge);
+            });
+            panel.appendChild(badges);
         }
 
         const cards = A.el('div', 'ms-list');
@@ -285,7 +292,7 @@
             ));
         }
 
-        const wrapping = collected().filter((i) => i.kind === 'phase').sort((a, b) => a.due.localeCompare(b.due));
+        const wrapping = A.items.phasesEnding(state.plan);
         if (wrapping.length) {
             panel.appendChild(A.el('div', 'group-head ms-phases-head', 'Phases ending soon'));
             const rows = A.el('div', 'row-list');
@@ -430,6 +437,7 @@
             loadEvents(),
         ]);
         state.plan = plan;
+        if (A.items.reachFinishedMilestones(plan)) A.store.plan.save(true);
         Object.entries(workspaces).forEach(([id, ws]) => { state.workspaces[id] = A.store.workspace(id).seed(ws); });
         custom.forEach((p) => { state.names[p.id] = p.name; });
         renderCalendarNote();

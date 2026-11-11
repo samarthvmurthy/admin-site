@@ -2,13 +2,16 @@
  * Everything that has to be done, from every module, in one shape — used by
  * the Up next page and the dashboard tile. Attached as Admin.items.
  *
- * Item: { key, kind: task|step|milestone|phase|event, title, due, time,
+ * Item: { key, kind: task|step|subtask|milestone|phase|event, title, due, time,
  *         priority, context, href, color?, ownerId?, refId }
+ *
+ * Subtasks are the work; a milestone is only a marker of progress, so
+ * collect() returns its open subtasks and never the milestone itself.
  */
 (function () {
     const A = window.Admin;
 
-    const KIND_LABEL = { task: 'Task', step: 'Next step', milestone: 'Milestone', phase: 'Phase', event: 'Event' };
+    const KIND_LABEL = { task: 'Task', step: 'Next step', subtask: 'Subtask', milestone: 'Milestone', phase: 'Phase', event: 'Event' };
 
     function pad(n) { return String(n).padStart(2, '0'); }
 
@@ -171,26 +174,55 @@
         };
     }
 
-    // Every open milestone, soonest first, with the undated ones last.
+    function eachMilestone(plan, fn) {
+        (plan?.roadmaps || []).forEach((r) => (r.phases || []).forEach((ph) => (ph.items || []).forEach((it) => fn(r, ph, it))));
+    }
+
+    // Open milestones, soonest first, with the undated ones last.
     function milestones(plan) {
         const out = [];
-        (plan?.roadmaps || []).forEach((r) => (r.phases || []).forEach((ph) => (ph.items || []).forEach((it) => {
-            if (!it.done) out.push(milestoneItem(r, ph, it));
-        })));
+        eachMilestone(plan, (r, ph, it) => { if (!it.done) out.push(milestoneItem(r, ph, it)); });
         return out.sort((a, b) => (a.due || '9999').localeCompare(b.due || '9999'));
     }
 
+    function reachedMilestones(plan) {
+        const out = [];
+        eachMilestone(plan, (r, ph, it) => { if (it.done) out.push(milestoneItem(r, ph, it)); });
+        return out;
+    }
+
+    // A milestone with subtasks is reached exactly when they're all done.
+    // Returns whether that changed anything.
+    function settleMilestone(it) {
+        const { done, total } = subtaskProgress(it);
+        if (!total || Boolean(it.done) === (done === total)) return false;
+        it.done = done === total;
+        return true;
+    }
+
+    // Catch milestones whose subtasks were all finished before they counted
+    // towards reaching it. Returns whether any changed.
+    function reachFinishedMilestones(plan) {
+        let changed = false;
+        eachMilestone(plan, (r, ph, it) => {
+            if (!it.done && settleMilestone(it)) changed = true;
+        });
+        return changed;
+    }
+
     // Tickable, editable subtasks for a milestone. Updates itself in place so
-    // the add box keeps focus; `onChange` lets the host refresh its progress.
-    // Subtasks have no dates, so they never touch the calendar mirror.
+    // the add box keeps focus; `onChange(settled)` lets the host refresh, and
+    // `settled` says the milestone was reached or reopened as a result.
+    // Subtasks take their milestone's date and have no calendar events.
     function subtaskEditor(it, { onChange } = {}) {
         const store = A.store.plan;
         const wrap = A.el('div', 'subtasks');
         const list = A.el('div', 'subtask-list');
 
         function changed() {
+            const settled = settleMilestone(it);
             store.save(true);
-            onChange?.();
+            onChange?.(settled);
         }
 
         function rowFor(s) {
@@ -240,7 +272,6 @@
     }
 
     function collect({ plan, workspaces, projectNames = {} }) {
-        const today = A.todayKey();
         const out = [];
 
         (plan?.tasks || []).forEach((t) => {
@@ -252,25 +283,15 @@
             });
         });
 
-        (plan?.roadmaps || []).forEach((r) => {
-            (r.phases || []).forEach((ph) => {
-                (ph.items || []).forEach((it) => {
-                    if (it.done || !it.due) return;
-                    const { done, total } = subtaskProgress(it);
-                    const item = milestoneItem(r, ph, it);
-                    out.push(total ? { ...item, context: `${r.title} · ${done}/${total} subtasks` } : item);
+        eachMilestone(plan, (r, ph, it) => {
+            if (it.done) return;
+            (it.subtasks || []).forEach((s) => {
+                if (s.done) return;
+                out.push({
+                    key: `subtask:${s.id}`, kind: 'subtask', title: s.title, due: it.due || '', time: '',
+                    priority: 'medium', context: `${it.title} · ${r.title}`,
+                    href: `pages/plan.html#roadmap=${encodeURIComponent(r.id)}`, refId: s.id, ownerId: r.id, milestoneId: it.id,
                 });
-                // Flag phases that wrap up within the week.
-                if (ph.end && ph.end >= today && A.daysBetween(today, ph.end) <= 7) {
-                    const open = (ph.items || []).some((it) => !it.done);
-                    if (open || !(ph.items || []).length) {
-                        out.push({
-                            key: `phase:${ph.id}`, kind: 'phase', title: `${ph.title} wraps up`, due: ph.end, time: '',
-                            priority: 'low', context: r.title, href: `pages/plan.html#roadmap=${encodeURIComponent(r.id)}`,
-                            refId: ph.id, ownerId: r.id,
-                        });
-                    }
-                }
             });
         });
 
@@ -288,6 +309,23 @@
         // (see syncAccepted), so it can be ticked off like everything else.
 
         return out;
+    }
+
+    // Phases that wrap up within the week.
+    function phasesEnding(plan) {
+        const today = A.todayKey();
+        const out = [];
+        (plan?.roadmaps || []).forEach((r) => (r.phases || []).forEach((ph) => {
+            if (!ph.end || ph.end < today || A.daysBetween(today, ph.end) > 7) return;
+            const items = ph.items || [];
+            if (items.length && items.every((it) => it.done)) return;
+            out.push({
+                key: `phase:${ph.id}`, kind: 'phase', title: `${ph.title} wraps up`, due: ph.end, time: '',
+                priority: 'low', context: r.title, href: `pages/plan.html#roadmap=${encodeURIComponent(r.id)}`,
+                refId: ph.id, ownerId: r.id,
+            });
+        }));
+        return out.sort((a, b) => a.due.localeCompare(b.due));
     }
 
     const BUCKETS = [
@@ -409,6 +447,20 @@
             }
             return false;
         }
+        if (item.kind === 'subtask') {
+            const plan = A.store.plan;
+            await plan.load();
+            let found = false;
+            eachMilestone(plan.doc, (r, ph, it) => {
+                const s = it.id === item.milestoneId && (it.subtasks || []).find((x) => x.id === item.refId);
+                if (!s) return;
+                s.done = true;
+                found = true;
+                if (settleMilestone(it)) A.toast(`Milestone reached: ${it.title}`, 'ok');
+            });
+            if (found) plan.save(true);
+            return found;
+        }
         if (item.kind === 'step') {
             const ws = A.store.workspace(item.ownerId);
             await ws.load();
@@ -421,7 +473,7 @@
 
     // ------------------------------------------------------------ render --
 
-    const COMPLETABLE = new Set(['task', 'step', 'milestone']);
+    const COMPLETABLE = new Set(['task', 'step', 'subtask']);
 
     function row(item, { onComplete, showKind = true } = {}) {
         const r = A.el('div', 'item-row');
@@ -468,5 +520,5 @@
         return r;
     }
 
-    A.items = { KIND_LABEL, BUCKETS, milestones, subtaskProgress, subtaskEditor, collect, group, top, fetchEvents, complete, completeStep, reopenStep, row, review, reviewQueue, taskFromEvent, linkTask, syncAccepted };
+    A.items = { KIND_LABEL, BUCKETS, milestones, reachedMilestones, reachFinishedMilestones, phasesEnding, subtaskProgress, subtaskEditor, collect, group, top, fetchEvents, complete, completeStep, reopenStep, row, review, reviewQueue, taskFromEvent, linkTask, syncAccepted };
 })();

@@ -536,7 +536,7 @@
                 toggle.setAttribute('aria-label', toggle.title);
             };
             toggleLabel();
-            const subtasks = A.items.subtaskEditor(it, { onChange: toggleLabel });
+            const subtasks = A.items.subtaskEditor(it, { onChange: (settled) => { if (settled) render(); else toggleLabel(); } });
             subtasks.hidden = !openSubtasks.has(it.id);
             row.appendChild(toggle);
             row.appendChild(dateField(it.due, 'Milestone due date', (v) => { it.due = v; }));
