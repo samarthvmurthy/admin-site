@@ -314,13 +314,69 @@
         });
     }
 
-    function renderList() {
-        const panel = A.clear(document.getElementById('upnext-list'));
+    // The Subtasks filter: every open milestone with its subtasks, editable in
+    // place (add, rename, date, tick, remove), soonest milestone first.
+    function subtaskBoardCard(item) {
+        const it = item.ref;
+        const card = A.el('article', 'ms-card');
+
+        const head = A.el('div', 'ms-head');
+        const main = A.el('a', 'ms-main');
+        main.href = A.pageHref(item.href);
+        main.appendChild(A.el('span', 'ms-title', item.title));
+        main.appendChild(A.el('span', 'ms-context', `${item.context} · ${item.phase}`));
+        head.appendChild(main);
+        const chip = A.dueChip(item.due);
+        if (chip) head.appendChild(chip);
+        card.appendChild(head);
+
+        const foot = A.el('div', 'ms-foot');
+        function renderFoot() {
+            A.clear(foot);
+            const { done, total } = A.items.subtaskProgress(it);
+            if (total) foot.appendChild(A.progressBar(done, total));
+            else foot.appendChild(A.el('span', 'ms-context', 'No subtasks yet'));
+        }
+        renderFoot();
+        card.appendChild(foot);
+
+        const editor = A.items.subtaskEditor(it, {
+            onChange: (settled) => {
+                renderFoot();
+                renderSummary();
+                renderMilestones();
+                renderSidebar();
+                if (settled) {
+                    if (it.done) A.toast(`Milestone reached: ${it.title}`, 'ok');
+                    document.activeElement?.blur();
+                    renderList();
+                }
+            },
+        });
+        card.appendChild(editor);
+        return card;
+    }
+
+    function renderSubtaskBoard(panel) {
+        const all = A.items.milestones(state.plan);
+        if (!all.length) {
+            const empty = A.el('div', 'empty-state');
+            empty.appendChild(A.el('strong', null, 'No open milestones'));
+            empty.appendChild(document.createTextNode('Subtasks belong to a milestone. Add one to a phase of a roadmap in Plan.'));
+            panel.appendChild(empty);
+            return;
+        }
+        panel.appendChild(A.el('p', 'hint', 'Add, rename, date and tick off subtasks here. Dated ones also show under All, by when they\'re due.'));
+        const cards = A.el('div', 'ms-list');
+        all.forEach((m) => cards.appendChild(subtaskBoardCard(m)));
+        panel.appendChild(cards);
+    }
+
+    function renderSummary() {
         const groups = A.items.group(items());
         const total = groups.reduce((n, g) => n + g.items.length, 0);
         const overdue = groups[0].items.length;
         const today = groups[1].items.length;
-
         const milestoneCount = A.items.milestones(state.plan).length;
         document.getElementById('upnext-summary').textContent = [
             overdue ? `${overdue} overdue` : '',
@@ -328,6 +384,21 @@
             total ? `${total} task${total === 1 ? '' : 's'}` : 'No tasks due',
             milestoneCount ? `${milestoneCount} milestone${milestoneCount === 1 ? '' : 's'}` : '',
         ].filter(Boolean).join(' · ');
+    }
+
+    function renderList() {
+        const host = document.getElementById('upnext-list');
+        if (state.filter === 'subtask') {
+            // Never pull a subtask box out from under someone typing in it.
+            if (host.contains(document.activeElement) && document.activeElement.tagName === 'INPUT') return;
+            renderSummary();
+            renderSubtaskBoard(A.clear(host));
+            return;
+        }
+        const panel = A.clear(host);
+        const groups = A.items.group(items());
+        const total = groups.reduce((n, g) => n + g.items.length, 0);
+        renderSummary();
 
         if (!total) {
             const empty = A.el('div', 'empty-state');
