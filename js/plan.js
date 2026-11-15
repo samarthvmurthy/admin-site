@@ -473,8 +473,9 @@
         return input;
     }
 
-    // Milestones whose subtask list is open; survives this page's re-renders.
-    const openSubtasks = new Set();
+    // Subtasks show right under each milestone; this holds the ones you've
+    // collapsed, and survives this page's re-renders.
+    const collapsedSubtasks = new Set();
 
     // Redraw without losing your place in a subtask list.
     function refocusAfter(editor, redraw) {
@@ -544,17 +545,21 @@
             text.setAttribute('aria-label', 'Milestone');
             row.appendChild(text);
             const toggle = A.button('', 'subtask-toggle', () => {
-                const open = !openSubtasks.has(it.id);
-                if (open) openSubtasks.add(it.id); else openSubtasks.delete(it.id);
+                const open = collapsedSubtasks.has(it.id);
+                if (open) collapsedSubtasks.delete(it.id); else collapsedSubtasks.add(it.id);
                 subtasks.hidden = !open;
+                toggleLabel();
                 if (open) subtasks.focusAdd();
             });
             const toggleLabel = () => {
                 const { done, total } = A.items.subtaskProgress(it);
                 A.clear(toggle).appendChild(A.icon('list', 13));
                 if (total) toggle.appendChild(A.el('span', null, `${done}/${total}`));
-                toggle.title = total ? `Subtasks: ${done} of ${total} done` : 'Add subtasks';
+                const open = !collapsedSubtasks.has(it.id);
+                toggle.classList.toggle('collapsed', !open);
+                toggle.title = `${total ? `Subtasks: ${done} of ${total} done` : 'Subtasks'} · ${open ? 'hide' : 'show'}`;
                 toggle.setAttribute('aria-label', toggle.title);
+                toggle.setAttribute('aria-expanded', String(open));
             };
             toggleLabel();
             const subtasks = A.items.subtaskEditor(it, {
@@ -570,7 +575,7 @@
                 },
             });
             subtasks.dataset.milestone = it.id;
-            subtasks.hidden = !openSubtasks.has(it.id);
+            subtasks.hidden = collapsedSubtasks.has(it.id);
             row.appendChild(toggle);
             row.appendChild(dateField(it.due, 'Milestone due date', (v) => { it.due = v; }));
             row.appendChild(A.iconButton('x', 'Remove milestone', () => {

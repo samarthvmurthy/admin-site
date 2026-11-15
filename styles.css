@@ -1566,3 +1566,4 @@ input.subtask-due:focus { border-color: var(--accent); background: var(--bg-alt)
     font-size: 0.72rem; font-weight: 600; color: var(--text-faint); font-variant-numeric: tabular-nums;
 }
 .subtask-toggle:hover { color: var(--text); background: var(--surface-2); }
+.subtask-toggle.collapsed { color: var(--text-dim); background: var(--surface-2); }
