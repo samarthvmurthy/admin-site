@@ -23,6 +23,7 @@
         store: null,     // Admin.store workspace doc
         roadmaps: [],
         others: {},      // other workspaces, for the sidebar
+        expanded: new Set(), // next steps open to their details
     };
     const ws = () => state.store.doc;
     const indicator = A.store.indicator();
@@ -39,33 +40,256 @@
         });
     }
 
-    function stepDialog(step) {
-        A.modal.open({
-            title: 'Edit next step',
-            fields: [
-                { name: 'text', label: 'Step', required: true, value: step.text },
-                { name: 'due', label: 'Due date', type: 'date', value: step.due || '', half: true },
-                { name: 'time', label: 'Time (optional)', type: 'time', value: step.time || '', half: true },
-                { name: 'priority', label: 'Priority', type: 'select', value: step.priority || 'medium', options: A.PRIORITIES, half: true },
-            ],
-            submitLabel: 'Save',
-            destructiveLabel: 'Delete',
-            onDestructive: () => {
-                ws().next = ws().next.filter((s) => s.id !== step.id);
+    // Each next step opens in place into its full detail: when, how urgent,
+    // what it involves (details) and the smaller steps to get it done
+    // (checklist). Edits save as you type and update the row without a
+    // redraw, so nothing jumps while you work; the list re-sorts next time.
+
+    function checklistProgress(s) {
+        const list = s.checklist || [];
+        return { done: list.filter((c) => c.done).length, total: list.length };
+    }
+
+    function autosize(ta) {
+        const fit = () => { ta.style.height = 'auto'; ta.style.height = `${ta.scrollHeight + 2}px`; };
+        ta.addEventListener('input', fit);
+        requestAnimationFrame(fit);
+    }
+
+    function deleteStep(s) {
+        ws().next = ws().next.filter((x) => x.id !== s.id);
+        state.expanded.delete(s.id);
+        save(true);
+        renderWorkspace();
+    }
+
+    function finishStep(s, row) {
+        row?.classList.add('is-done');
+        row?.querySelector('.check')?.classList.add('on');
+        setTimeout(() => {
+            A.items.completeStep(ws(), s.id);
+            state.expanded.delete(s.id);
+            save(true);
+            renderWorkspace();
+            A.toast('Moved to Achieved', 'ok');
+        }, 260);
+    }
+
+    // The row's right-hand side: checklist progress, priority, due date.
+    function stepMeta(s, meta) {
+        A.clear(meta);
+        const { done, total } = checklistProgress(s);
+        if (total) {
+            const chip = A.el('span', `step-progress${done === total ? ' complete' : ''}`);
+            chip.title = `${done} of ${total} steps done`;
+            chip.appendChild(A.icon('list', 12));
+            chip.appendChild(A.el('span', null, `${done}/${total}`));
+            meta.appendChild(chip);
+        }
+        if (s.details?.trim()) {
+            const note = A.icon('pencil', 12, 'inline-icon step-has-details');
+            note.title = 'Has details';
+            meta.appendChild(note);
+        }
+        meta.appendChild(A.priorityFlag(s.priority));
+        const chip = A.dueChip(s.due, s.time);
+        if (chip) meta.appendChild(chip);
+    }
+
+    function checklistEditor(s, onChange) {
+        const wrap = A.el('div', 'step-checklist');
+        const list = A.el('div', 'subtask-list');
+
+        function rowFor(c) {
+            const row = A.el('div', `subtask${c.done ? ' done' : ''}`);
+            row.appendChild(A.checkbox(c.done, (v) => {
+                c.done = v;
+                const next = rowFor(c);
+                row.replaceWith(next);
+                next.querySelector('.check').focus();
                 save(true);
-                renderWorkspace();
-            },
-            onSubmit: (v) => {
-                if (v.time && !v.due) throw new Error('Pick a date to go with that time.');
-                Object.assign(step, { text: v.text, due: v.due, time: v.time, priority: v.priority });
+                onChange();
+            }, `Mark "${c.text}" ${c.done ? 'not done' : 'done'}`));
+            const text = A.el('input', 'subtask-title');
+            text.type = 'text';
+            text.value = c.text;
+            text.setAttribute('aria-label', 'Step');
+            text.addEventListener('input', () => { c.text = text.value; save(); });
+            text.addEventListener('keydown', (e) => { if (e.key === 'Enter') add.focus(); });
+            row.appendChild(text);
+            row.appendChild(A.iconButton('x', 'Remove step', () => {
+                s.checklist = s.checklist.filter((x) => x.id !== c.id);
+                row.remove();
                 save(true);
-                renderWorkspace();
-            },
+                onChange();
+                add.focus();
+            }, 'icon-btn sm danger'));
+            return row;
+        }
+
+        (s.checklist || []).forEach((c) => list.appendChild(rowFor(c)));
+        wrap.appendChild(list);
+
+        const add = A.el('input', 'inline-add subtask-add');
+        add.type = 'text';
+        add.placeholder = '+ Add a step and press Enter';
+        add.setAttribute('aria-label', `Add a step to ${s.text}`);
+        add.addEventListener('keydown', (e) => {
+            if (e.key !== 'Enter' || !add.value.trim()) return;
+            e.preventDefault();
+            const c = { id: A.uid(), text: add.value.trim(), done: false };
+            s.checklist = [...(s.checklist || []), c];
+            list.appendChild(rowFor(c));
+            add.value = '';
+            save(true);
+            onChange();
         });
+        const addRow = A.el('div', 'subtask-add-row');
+        addRow.appendChild(add);
+        wrap.appendChild(addRow);
+        wrap.focusAdd = () => add.focus();
+        return wrap;
+    }
+
+    function stepDetail(s, { row, title, meta }) {
+        const panel = A.el('div', 'step-detail');
+        const refresh = () => stepMeta(s, meta);
+
+        const fields = A.el('div', 'step-fields');
+        const name = A.el('input', 'step-name');
+        name.type = 'text';
+        name.value = s.text;
+        name.setAttribute('aria-label', 'Step');
+        name.addEventListener('input', () => {
+            s.text = name.value;
+            title.textContent = name.value || 'Untitled step';
+            save();
+        });
+        name.addEventListener('blur', () => {
+            if (name.value.trim()) return;
+            s.text = 'Untitled step';
+            name.value = s.text;
+            title.textContent = s.text;
+            save(true);
+        });
+        fields.appendChild(name);
+
+        const due = A.el('input');
+        due.type = 'date';
+        due.value = s.due || '';
+        due.setAttribute('aria-label', 'Due date');
+        const time = A.el('input');
+        time.type = 'time';
+        time.value = s.time || '';
+        time.setAttribute('aria-label', 'Time (optional)');
+        time.disabled = !s.due;
+        time.title = s.due ? 'Time (optional)' : 'Pick a date first';
+        due.addEventListener('change', () => {
+            s.due = due.value;
+            if (!s.due) { s.time = ''; time.value = ''; }
+            time.disabled = !s.due;
+            time.title = s.due ? 'Time (optional)' : 'Pick a date first';
+            save(true);
+            refresh();
+        });
+        time.addEventListener('change', () => { s.time = time.value; save(true); refresh(); });
+        const prio = A.el('select');
+        prio.setAttribute('aria-label', 'Priority');
+        A.PRIORITIES.forEach((p) => {
+            const o = A.el('option', null, p.label);
+            o.value = p.value;
+            if (p.value === (s.priority || 'medium')) o.selected = true;
+            prio.appendChild(o);
+        });
+        prio.addEventListener('change', () => { s.priority = prio.value; save(true); refresh(); });
+        [due, time, prio].forEach((n) => fields.appendChild(n));
+        panel.appendChild(fields);
+
+        panel.appendChild(A.el('div', 'subfield-label', 'Details'));
+        const details = A.el('textarea', 'step-details');
+        details.rows = 3;
+        details.value = s.details || '';
+        details.placeholder = 'What this involves, how you\'ll approach it, what "done" looks like, links…';
+        details.setAttribute('aria-label', 'Details');
+        details.addEventListener('input', () => { s.details = details.value; save(); refresh(); });
+        autosize(details);
+        panel.appendChild(details);
+
+        const checkHead = A.el('div', 'subfield-label step-check-head');
+        checkHead.appendChild(A.el('span', null, 'Steps'));
+        const bar = A.el('span', 'step-check-bar');
+        checkHead.appendChild(bar);
+        panel.appendChild(checkHead);
+        const renderBar = () => {
+            A.clear(bar);
+            const { done, total } = checklistProgress(s);
+            if (total) bar.appendChild(A.progressBar(done, total));
+        };
+        renderBar();
+        const checklist = checklistEditor(s, () => { renderBar(); refresh(); });
+        panel.appendChild(checklist);
+
+        const foot = A.el('div', 'step-foot');
+        const doneBtn = A.button('', 'btn btn-add-primary btn-small', () => finishStep(s, row));
+        doneBtn.appendChild(A.icon('check', 13));
+        doneBtn.appendChild(A.el('span', null, 'Mark done'));
+        foot.appendChild(doneBtn);
+        foot.appendChild(A.button('Delete step', 'btn btn-ghost btn-small step-delete', () => deleteStep(s)));
+        panel.appendChild(foot);
+
+        panel.focusName = () => name.focus();
+        return panel;
+    }
+
+    function stepCard(s) {
+        const card = A.el('div', 'step-card');
+        card.id = `step-${s.id}`;
+        const open = () => state.expanded.has(s.id);
+
+        const row = A.el('div', 'item-row step-row');
+        row.appendChild(A.checkbox(false, () => finishStep(s, row), `Mark "${s.text}" done`));
+        const main = A.el('div', 'item-main');
+        main.tabIndex = 0;
+        main.setAttribute('role', 'button');
+        const title = A.el('span', 'item-title', s.text);
+        main.appendChild(title);
+        row.appendChild(main);
+        const meta = A.el('div', 'item-meta');
+        stepMeta(s, meta);
+        row.appendChild(meta);
+        const chev = A.iconButton('chevronRight', 'Show details', null, 'icon-btn sm step-chev');
+        row.appendChild(chev);
+        card.appendChild(row);
+
+        let detail = null;
+        function setOpen(next, focus) {
+            if (next) state.expanded.add(s.id); else state.expanded.delete(s.id);
+            card.classList.toggle('open', next);
+            chev.title = next ? 'Hide details' : 'Show details';
+            chev.setAttribute('aria-label', chev.title);
+            main.setAttribute('aria-expanded', String(next));
+            chev.setAttribute('aria-expanded', String(next));
+            if (next && !detail) {
+                detail = stepDetail(s, { row, title, meta });
+                card.appendChild(detail);
+            }
+            if (detail) detail.hidden = !next;
+            if (next && focus) detail.focusName();
+        }
+        const toggle = () => setOpen(!open(), true);
+        main.addEventListener('click', toggle);
+        main.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } });
+        chev.addEventListener('click', toggle);
+        setOpen(open(), false);
+        return card;
     }
 
     function renderNext() {
-        const host = A.clear(document.getElementById('next-body'));
+        const host = document.getElementById('next-body');
+        // Never pull a field out from under someone typing in it.
+        const typing = document.activeElement?.closest?.('#next-body .step-detail');
+        if (typing && /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName)) return;
+        A.clear(host);
         document.getElementById('next-count').textContent = String(ws().next.length);
 
         const form = A.el('form', 'quick-add compact');
@@ -92,7 +316,7 @@
             e.preventDefault();
             const value = text.value.trim();
             if (!value) { text.focus(); return; }
-            ws().next.push({ id: A.uid(), text: value, due: due.value, time: '', priority: prio.value, createdAt: new Date().toISOString() });
+            ws().next.push({ id: A.uid(), text: value, due: due.value, time: '', priority: prio.value, details: '', checklist: [], createdAt: new Date().toISOString() });
             save(true);
             renderWorkspace();
             document.querySelector('#next-body .qa-title')?.focus();
@@ -100,48 +324,48 @@
         host.appendChild(form);
 
         if (!ws().next.length) {
-            host.appendChild(A.el('p', 'hint', 'No next steps. Write down what you\'ll do the next time you sit down with this.'));
+            host.appendChild(A.el('p', 'hint', 'No next steps. Write down what you\'ll do the next time you sit down with this, then open it to add details and smaller steps.'));
             return;
         }
 
-        const rows = A.el('div', 'row-list');
-        sortSteps(ws().next).forEach((s) => {
-            const row = A.el('div', 'item-row');
-            row.appendChild(A.checkbox(false, () => {
-                row.classList.add('is-done');
-                row.querySelector('.check').classList.add('on');
-                setTimeout(() => {
-                    A.items.completeStep(ws(), s.id);
-                    save(true);
-                    renderWorkspace();
-                    A.toast('Moved to Achieved', 'ok');
-                }, 260);
-            }, `Mark "${s.text}" done`));
-            const main = A.el('div', 'item-main');
-            main.tabIndex = 0;
-            main.setAttribute('role', 'button');
-            main.appendChild(A.el('span', 'item-title', s.text));
-            main.addEventListener('click', () => stepDialog(s));
-            main.addEventListener('keydown', (e) => { if (e.key === 'Enter') stepDialog(s); });
-            row.appendChild(main);
-            const meta = A.el('div', 'item-meta');
-            meta.appendChild(A.priorityFlag(s.priority));
-            const chip = A.dueChip(s.due, s.time);
-            if (chip) meta.appendChild(chip);
-            const actions = A.el('div', 'item-actions');
-            actions.appendChild(A.iconButton('trash', 'Delete step', () => {
-                ws().next = ws().next.filter((x) => x.id !== s.id);
-                save(true);
-                renderWorkspace();
-            }, 'icon-btn sm danger'));
-            meta.appendChild(actions);
-            row.appendChild(meta);
-            rows.appendChild(row);
-        });
+        const rows = A.el('div', 'step-list');
+        sortSteps(ws().next).forEach((s) => rows.appendChild(stepCard(s)));
         host.appendChild(rows);
     }
 
+    // Opened from elsewhere (Up next, calendar) as project.html?id=…#step=<id>.
+    function openStepFromHash() {
+        const id = new URLSearchParams(window.location.hash.slice(1)).get('step');
+        if (!id || !ws().next.some((s) => s.id === id)) return;
+        state.expanded.add(id);
+        renderNext();
+        document.getElementById(`step-${id}`)?.scrollIntoView({ block: 'center' });
+    }
+
     // ------------------------------------------------------------ achieved --
+
+    // A finished step keeps its details and checklist, read-only, behind a
+    // small toggle; move it back to Next steps to edit them.
+    function achievedDetail(a, body) {
+        const { done, total } = checklistProgress(a);
+        const details = (a.details || '').trim();
+        if (!total && !details) return;
+        const more = A.el('div', 'achieved-more');
+        more.hidden = true;
+        if (details) more.appendChild(A.el('p', 'achieved-details', details));
+        if (total) {
+            const list = A.el('ul', 'achieved-checklist');
+            a.checklist.forEach((c) => list.appendChild(A.el('li', c.done ? 'done' : '', c.text)));
+            more.appendChild(list);
+        }
+        const label = [total ? `${done}/${total} steps` : '', details ? 'details' : ''].filter(Boolean).join(' · ');
+        const toggle = A.button(`Show ${label}`, 'link-btn achieved-toggle', () => {
+            more.hidden = !more.hidden;
+            toggle.textContent = `${more.hidden ? 'Show' : 'Hide'} ${label}`;
+        });
+        body.appendChild(toggle);
+        body.appendChild(more);
+    }
 
     function renderAchieved() {
         const host = A.clear(document.getElementById('achieved-body'));
@@ -183,6 +407,7 @@
             const body = A.el('div', 'achieved-body');
             body.appendChild(A.el('div', 'achieved-text', a.text));
             if (a.date) body.appendChild(A.el('div', 'achieved-date', A.parseDate(a.date).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })));
+            achievedDetail(a, body);
             item.appendChild(body);
             const actions = A.el('div', 'item-actions');
             actions.appendChild(A.iconButton('refresh', 'Move back to next steps', () => {
@@ -596,6 +821,8 @@
             renderNotes();
             renderDetails();
             renderRepoSide();
+            openStepFromHash();
+            window.addEventListener('hashchange', openStepFromHash);
         } catch (e) {
             hint.textContent = `Could not load this project: ${e.message}`;
         }

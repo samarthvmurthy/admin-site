@@ -1567,3 +1567,41 @@ input.subtask-due:focus { border-color: var(--accent); background: var(--bg-alt)
 }
 .subtask-toggle:hover { color: var(--text); background: var(--surface-2); }
 .subtask-toggle.collapsed { color: var(--text-dim); background: var(--surface-2); }
+
+/* Project next steps: each opens in place to details and a checklist */
+.step-list { display: flex; flex-direction: column; gap: 0.35rem; }
+.step-card { border: 1px solid transparent; border-radius: var(--radius-sm); }
+.step-card.open { border-color: var(--border); background: var(--bg-alt); }
+.step-card .step-row { border-radius: var(--radius-sm); }
+.step-card.open .step-row { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+.step-list .item-row + .item-row { border-top: none; }
+.step-chev { flex-shrink: 0; }
+.step-chev svg { transition: transform 0.12s ease; }
+.step-card.open .step-chev svg { transform: rotate(90deg); }
+.step-progress {
+    display: inline-flex; align-items: center; gap: 0.2rem;
+    font-size: 0.72rem; font-weight: 600; color: var(--text-dim); font-variant-numeric: tabular-nums;
+}
+.step-progress.complete { color: var(--ok); }
+.step-has-details { color: var(--text-faint); }
+.step-detail { padding: 0.35rem 0.75rem 0.7rem 2.35rem; display: flex; flex-direction: column; }
+.step-fields { display: flex; flex-wrap: wrap; gap: 0.45rem; margin-bottom: 0.75rem; }
+.step-fields input.step-name { flex: 1 1 14rem; min-width: 0; font-weight: 600; }
+.step-fields input[type="date"], .step-fields input[type="time"], .step-fields select { width: auto; flex: 0 0 auto; font-size: 0.8rem; }
+.step-fields input[type="time"]:disabled { opacity: 0.5; }
+textarea.step-details { min-height: 3.4rem; resize: none; overflow: hidden; margin-bottom: 0.75rem; font-size: 0.85rem; }
+.step-check-head { display: flex; align-items: center; gap: 0.7rem; margin-bottom: 0.3rem; }
+.step-check-bar { flex: 1; min-width: 0; max-width: 14rem; text-transform: none; letter-spacing: 0; }
+.step-check-bar:empty { display: none; }
+.step-foot { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.8rem; }
+.step-foot .btn { display: inline-flex; align-items: center; gap: 0.3rem; }
+.step-delete { margin-left: auto; color: var(--danger); }
+.achieved-toggle { font-size: 0.72rem; margin-top: 0.15rem; }
+.achieved-more { margin-top: 0.3rem; font-size: 0.8rem; color: var(--text-dim); }
+.achieved-details { margin: 0 0 0.3rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+.achieved-checklist { margin: 0; padding-left: 1.1rem; }
+.achieved-checklist li.done { text-decoration: line-through; color: var(--text-faint); }
+@media (max-width: 640px) {
+    .step-detail { padding-left: 0.75rem; }
+    .step-row .item-meta .prio { display: none; }
+}

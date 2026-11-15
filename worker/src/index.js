@@ -401,8 +401,8 @@ function emptyWorkspace() {
     summary: '',
     liveUrl: '',
     projectName: '',
-    next: [],       // [{ id, text, due, time, priority, createdAt }]
-    achieved: [],   // [{ id, text, date, due? }]
+    next: [],       // [{ id, text, due, time, priority, details, checklist: [{ id, text, done }], createdAt }]
+    achieved: [],   // [{ ...next step, date }]
     notes: '',
     links: [],
     timeZone: '',
@@ -780,7 +780,9 @@ function stepSpec(ws, projectId, s, done) {
     summary: `${done ? '✓' : '○'} ${s.text || 'Next step'} · ${project}`,
     description: [
       s.priority ? `Priority: ${s.priority}` : '',
-      `Project: ${SITE_URL}/pages/project.html?id=${enc(projectId)}`,
+      String(s.details || '').trim(),
+      arr(s.checklist).length ? arr(s.checklist).map((c) => `${c.done ? '☑' : '☐'} ${c.text || ''}`).join('\n') : '',
+      `Project: ${SITE_URL}/pages/project.html?id=${enc(projectId)}#step=${enc(s.id)}`,
     ].filter(Boolean).join('\n\n'),
     ...eventWhen(s.due, s.time, 30, ws.timeZone),
     transparency: 'transparent',

@@ -315,6 +315,12 @@
         return wrap;
     }
 
+    // "Project · 2/5 steps" when a next step has a checklist.
+    function stepContext(project, s) {
+        const list = s.checklist || [];
+        return list.length ? `${project} · ${list.filter((c) => c.done).length}/${list.length} steps` : project;
+    }
+
     function collect({ plan, workspaces, projectNames = {} }) {
         const out = [];
 
@@ -344,8 +350,8 @@
             (ws.next || []).forEach((s) => {
                 out.push({
                     key: `step:${id}:${s.id}`, kind: 'step', title: s.text, due: s.due || '', time: s.time || '',
-                    priority: s.priority || 'medium', context: projectNames[id] || ws.projectName || A.projectLabel(id),
-                    href: A.projectHref(id).replace(/^\.\.\//, ''), refId: s.id, ownerId: id,
+                    priority: s.priority || 'medium', context: stepContext(projectNames[id] || ws.projectName || A.projectLabel(id), s),
+                    href: `${A.projectHref(id).replace(/^\.\.\//, '')}#step=${encodeURIComponent(s.id)}`, refId: s.id, ownerId: id,
                 });
             });
         });
