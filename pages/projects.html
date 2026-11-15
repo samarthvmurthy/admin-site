@@ -28,6 +28,7 @@
         <main>
 
             <div class="toolbar">
+                <div class="filter-chips mode-tabs" id="mode-tabs" role="tablist" aria-label="View"></div>
                 <input type="search" id="project-search" class="toolbar-search" placeholder="Search projects…" autocomplete="off" aria-label="Search projects">
                 <select id="project-sort" class="toolbar-select" aria-label="Sort projects">
                     <option value="touched">Recently worked on</option>
@@ -38,7 +39,9 @@
             </div>
 
             <p class="hint" id="projects-hint">Loading your GitHub repositories…</p>
+            <div id="review-banner"></div>
             <div class="project-grid" id="project-grid"></div>
+            <div id="work-host" hidden></div>
         </main>
     </div>
 </div>
@@ -50,6 +53,7 @@
 <script src="../js/modal.js"></script>
 <script src="../js/store.js"></script>
 <script src="../js/items.js"></script>
+<script src="../js/steps.js"></script>
 <script src="../js/projects.js"></script>
 </body>
 </html>

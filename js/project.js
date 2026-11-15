@@ -24,313 +24,184 @@
         roadmaps: [],
         others: {},      // other workspaces, for the sidebar
         expanded: new Set(), // next steps open to their details
+        refInfo: new Map(),  // GitHub issue/PR number → { title, state, merged, isPull }
     };
     const ws = () => state.store.doc;
     const indicator = A.store.indicator();
     const save = (now) => state.store.save(now);
 
     // ---------------------------------------------------------- next steps --
+    //
+    // A list or a board (To do / In progress / Blocked) of next steps. Each
+    // opens in place to its full detail; see steps.js for the editor.
 
-    function sortSteps(list) {
-        return [...list].sort((a, b) => {
-            if (a.due && b.due) return a.due.localeCompare(b.due) || A.priorityRank(a.priority) - A.priorityRank(b.priority);
-            if (a.due) return -1;
-            if (b.due) return 1;
-            return A.priorityRank(a.priority) - A.priorityRank(b.priority);
-        });
+    const prefs = (() => {
+        try { return JSON.parse(localStorage.getItem('cp:project') || '{}'); } catch { return {}; }
+    })();
+    prefs.stepView = prefs.stepView === 'board' ? 'board' : 'list';
+    prefs.achievedBy = prefs.achievedBy === 'version' ? 'version' : 'month';
+    prefs.notesTab = prefs.notesTab === 'decisions' ? 'decisions' : 'notes';
+    function savePrefs() {
+        try { localStorage.setItem('cp:project', JSON.stringify(prefs)); } catch { /* blocked */ }
     }
 
-    // Each next step opens in place into its full detail: when, how urgent,
-    // what it involves (details) and the smaller steps to get it done
-    // (checklist). Edits save as you type and update the row without a
-    // redraw, so nothing jumps while you work; the list re-sorts next time.
+    const filter = { scope: 'all', label: '' };
+    const SCOPES = [
+        { key: 'all', label: 'All', test: () => true },
+        { key: 'week', label: 'This week', test: (s) => A.steps.isFocus(s) },
+        { key: 'doing', label: 'In progress', test: (s) => A.steps.statusOf(s) === 'doing' },
+        { key: 'blocked', label: 'Blocked', test: (s) => A.steps.statusOf(s) === 'blocked' },
+    ];
 
-    function checklistProgress(s) {
-        const list = s.checklist || [];
-        return { done: list.filter((c) => c.done).length, total: list.length };
-    }
+    // This workspace plus every other one, for labels and weekly capacity.
+    const allDocs = () => [ws(), ...Object.entries(state.others).filter(([id]) => id !== state.id).map(([, w]) => w)];
 
-    function autosize(ta) {
-        const fit = () => { ta.style.height = 'auto'; ta.style.height = `${ta.scrollHeight + 2}px`; };
-        ta.addEventListener('input', fit);
-        requestAnimationFrame(fit);
-    }
-
-    function deleteStep(s) {
-        ws().next = ws().next.filter((x) => x.id !== s.id);
-        state.expanded.delete(s.id);
-        save(true);
-        renderWorkspace();
-    }
-
-    function finishStep(s, row) {
-        row?.classList.add('is-done');
-        row?.querySelector('.check')?.classList.add('on');
-        setTimeout(() => {
-            A.items.completeStep(ws(), s.id);
-            state.expanded.delete(s.id);
-            save(true);
-            renderWorkspace();
-            A.toast('Moved to Achieved', 'ok');
-        }, 260);
-    }
-
-    // The row's right-hand side: checklist progress, priority, due date.
-    function stepMeta(s, meta) {
-        A.clear(meta);
-        const { done, total } = checklistProgress(s);
-        if (total) {
-            const chip = A.el('span', `step-progress${done === total ? ' complete' : ''}`);
-            chip.title = `${done} of ${total} steps done`;
-            chip.appendChild(A.icon('list', 12));
-            chip.appendChild(A.el('span', null, `${done}/${total}`));
-            meta.appendChild(chip);
-        }
-        if (s.details?.trim()) {
-            const note = A.icon('pencil', 12, 'inline-icon step-has-details');
-            note.title = 'Has details';
-            meta.appendChild(note);
-        }
-        meta.appendChild(A.priorityFlag(s.priority));
-        const chip = A.dueChip(s.due, s.time);
-        if (chip) meta.appendChild(chip);
-    }
-
-    function checklistEditor(s, onChange) {
-        const wrap = A.el('div', 'step-checklist');
-        const list = A.el('div', 'subtask-list');
-
-        function rowFor(c) {
-            const row = A.el('div', `subtask${c.done ? ' done' : ''}`);
-            row.appendChild(A.checkbox(c.done, (v) => {
-                c.done = v;
-                const next = rowFor(c);
-                row.replaceWith(next);
-                next.querySelector('.check').focus();
-                save(true);
-                onChange();
-            }, `Mark "${c.text}" ${c.done ? 'not done' : 'done'}`));
-            const text = A.el('input', 'subtask-title');
-            text.type = 'text';
-            text.value = c.text;
-            text.setAttribute('aria-label', 'Step');
-            text.addEventListener('input', () => { c.text = text.value; save(); });
-            text.addEventListener('keydown', (e) => { if (e.key === 'Enter') add.focus(); });
-            row.appendChild(text);
-            row.appendChild(A.iconButton('x', 'Remove step', () => {
-                s.checklist = s.checklist.filter((x) => x.id !== c.id);
-                row.remove();
-                save(true);
-                onChange();
-                add.focus();
-            }, 'icon-btn sm danger'));
-            return row;
-        }
-
-        (s.checklist || []).forEach((c) => list.appendChild(rowFor(c)));
-        wrap.appendChild(list);
-
-        const add = A.el('input', 'inline-add subtask-add');
-        add.type = 'text';
-        add.placeholder = '+ Add a step and press Enter';
-        add.setAttribute('aria-label', `Add a step to ${s.text}`);
-        add.addEventListener('keydown', (e) => {
-            if (e.key !== 'Enter' || !add.value.trim()) return;
-            e.preventDefault();
-            const c = { id: A.uid(), text: add.value.trim(), done: false };
-            s.checklist = [...(s.checklist || []), c];
-            list.appendChild(rowFor(c));
-            add.value = '';
-            save(true);
-            onChange();
-        });
-        const addRow = A.el('div', 'subtask-add-row');
-        addRow.appendChild(add);
-        wrap.appendChild(addRow);
-        wrap.focusAdd = () => add.focus();
-        return wrap;
-    }
-
-    function stepDetail(s, { row, title, meta }) {
-        const panel = A.el('div', 'step-detail');
-        const refresh = () => stepMeta(s, meta);
-
-        const fields = A.el('div', 'step-fields');
-        const name = A.el('input', 'step-name');
-        name.type = 'text';
-        name.value = s.text;
-        name.setAttribute('aria-label', 'Step');
-        name.addEventListener('input', () => {
-            s.text = name.value;
-            title.textContent = name.value || 'Untitled step';
-            save();
-        });
-        name.addEventListener('blur', () => {
-            if (name.value.trim()) return;
-            s.text = 'Untitled step';
-            name.value = s.text;
-            title.textContent = s.text;
-            save(true);
-        });
-        fields.appendChild(name);
-
-        const due = A.el('input');
-        due.type = 'date';
-        due.value = s.due || '';
-        due.setAttribute('aria-label', 'Due date');
-        const time = A.el('input');
-        time.type = 'time';
-        time.value = s.time || '';
-        time.setAttribute('aria-label', 'Time (optional)');
-        time.disabled = !s.due;
-        time.title = s.due ? 'Time (optional)' : 'Pick a date first';
-        due.addEventListener('change', () => {
-            s.due = due.value;
-            if (!s.due) { s.time = ''; time.value = ''; }
-            time.disabled = !s.due;
-            time.title = s.due ? 'Time (optional)' : 'Pick a date first';
-            save(true);
-            refresh();
-        });
-        time.addEventListener('change', () => { s.time = time.value; save(true); refresh(); });
-        const prio = A.el('select');
-        prio.setAttribute('aria-label', 'Priority');
-        A.PRIORITIES.forEach((p) => {
-            const o = A.el('option', null, p.label);
-            o.value = p.value;
-            if (p.value === (s.priority || 'medium')) o.selected = true;
-            prio.appendChild(o);
-        });
-        prio.addEventListener('change', () => { s.priority = prio.value; save(true); refresh(); });
-        [due, time, prio].forEach((n) => fields.appendChild(n));
-        panel.appendChild(fields);
-
-        panel.appendChild(A.el('div', 'subfield-label', 'Details'));
-        const details = A.el('textarea', 'step-details');
-        details.rows = 3;
-        details.value = s.details || '';
-        details.placeholder = 'What this involves, how you\'ll approach it, what "done" looks like, links…';
-        details.setAttribute('aria-label', 'Details');
-        details.addEventListener('input', () => { s.details = details.value; save(); refresh(); });
-        autosize(details);
-        panel.appendChild(details);
-
-        const checkHead = A.el('div', 'subfield-label step-check-head');
-        checkHead.appendChild(A.el('span', null, 'Steps'));
-        const bar = A.el('span', 'step-check-bar');
-        checkHead.appendChild(bar);
-        panel.appendChild(checkHead);
-        const renderBar = () => {
-            A.clear(bar);
-            const { done, total } = checklistProgress(s);
-            if (total) bar.appendChild(A.progressBar(done, total));
+    function stepCtx() {
+        return {
+            doc: ws,
+            save,
+            expanded: state.expanded,
+            rerender: (focus) => {
+                renderWorkspace(true);
+                if (focus) document.querySelector(focus)?.focus();
+            },
+            changed: renderCounts,
+            projectId: state.id,
+            roadmaps: state.roadmaps,
+            repo: state.repoName,
+            refInfo: state.refInfo,
+            loadRefs,
+            knownLabels: () => A.steps.knownLabels(allDocs()),
+            onFocusChange: () => A.steps.warnIfOver(allDocs()),
         };
-        renderBar();
-        const checklist = checklistEditor(s, () => { renderBar(); refresh(); });
-        panel.appendChild(checklist);
-
-        const foot = A.el('div', 'step-foot');
-        const doneBtn = A.button('', 'btn btn-add-primary btn-small', () => finishStep(s, row));
-        doneBtn.appendChild(A.icon('check', 13));
-        doneBtn.appendChild(A.el('span', null, 'Mark done'));
-        foot.appendChild(doneBtn);
-        foot.appendChild(A.button('Delete step', 'btn btn-ghost btn-small step-delete', () => deleteStep(s)));
-        panel.appendChild(foot);
-
-        panel.focusName = () => name.focus();
-        return panel;
     }
 
-    function stepCard(s) {
-        const card = A.el('div', 'step-card');
-        card.id = `step-${s.id}`;
-        const open = () => state.expanded.has(s.id);
+    // GitHub issue/PR status for linked steps, fetched once per number.
+    async function loadRefs(numbers) {
+        const missing = [...new Set(numbers)].filter((n) => !state.refInfo.has(n));
+        if (!state.repoName || !missing.length) return;
+        try {
+            const list = await A.api(`/repo/refs?repo=${encodeURIComponent(state.repoName)}&n=${missing.join(',')}`);
+            list.forEach((r) => state.refInfo.set(r.number, r));
+        } catch { /* chips stay neutral */ }
+    }
 
-        const row = A.el('div', 'item-row step-row');
-        row.appendChild(A.checkbox(false, () => finishStep(s, row), `Mark "${s.text}" done`));
-        const main = A.el('div', 'item-main');
-        main.tabIndex = 0;
-        main.setAttribute('role', 'button');
-        const title = A.el('span', 'item-title', s.text);
-        main.appendChild(title);
-        row.appendChild(main);
-        const meta = A.el('div', 'item-meta');
-        stepMeta(s, meta);
-        row.appendChild(meta);
-        const chev = A.iconButton('chevronRight', 'Show details', null, 'icon-btn sm step-chev');
-        row.appendChild(chev);
-        card.appendChild(row);
-
-        let detail = null;
-        function setOpen(next, focus) {
-            if (next) state.expanded.add(s.id); else state.expanded.delete(s.id);
-            card.classList.toggle('open', next);
-            chev.title = next ? 'Hide details' : 'Show details';
-            chev.setAttribute('aria-label', chev.title);
-            main.setAttribute('aria-expanded', String(next));
-            chev.setAttribute('aria-expanded', String(next));
-            if (next && !detail) {
-                detail = stepDetail(s, { row, title, meta });
-                card.appendChild(detail);
+    // A step whose linked issues are all closed and PRs all merged is done.
+    async function closeStepsByRefs() {
+        const linked = ws().next.filter((s) => s.refs?.length);
+        if (!linked.length) return;
+        await loadRefs(linked.flatMap((s) => s.refs));
+        const closed = [];
+        linked.forEach((s) => {
+            if (!A.steps.refsDone(s, state.refInfo)) return;
+            const done = A.items.completeStep(ws(), s.id);
+            if (done) {
+                done.closedBy = s.refs.map((n) => `#${n}`).join(', ');
+                closed.push(done);
             }
-            if (detail) detail.hidden = !next;
-            if (next && focus) detail.focusName();
+        });
+        if (closed.length) {
+            save(true);
+            A.toast(closed.length === 1
+                ? `Ticked off "${closed[0].text}": ${closed[0].closedBy} done on GitHub`
+                : `Ticked off ${closed.length} steps whose GitHub issues and PRs are done`, 'ok');
         }
-        const toggle = () => setOpen(!open(), true);
-        main.addEventListener('click', toggle);
-        main.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } });
-        chev.addEventListener('click', toggle);
-        setOpen(open(), false);
-        return card;
+        renderWorkspace(true);
     }
 
-    function renderNext() {
+    function renderCounts() {
+        document.getElementById('next-count').textContent = String(ws().next.length);
+        renderSidebar();
+    }
+
+    function renderStepTools() {
+        const host = A.clear(document.getElementById('next-tools'));
+        [['list', 'List'], ['board', 'Board']].forEach(([key, label]) => {
+            const b = A.button(label, `filter-chip${prefs.stepView === key ? ' on' : ''}`, () => {
+                prefs.stepView = key;
+                savePrefs();
+                renderNext(true);
+            });
+            b.setAttribute('aria-pressed', String(prefs.stepView === key));
+            host.appendChild(b);
+        });
+    }
+
+    function renderFilters(host) {
+        const steps = ws().next;
+        const bar = A.el('div', 'filter-chips step-filters');
+        SCOPES.forEach((sc) => {
+            const n = steps.filter(sc.test).length;
+            if (sc.key !== 'all' && !n && filter.scope !== sc.key) return;
+            bar.appendChild(A.button(`${sc.label}${sc.key === 'all' ? '' : ` ${n}`}`, `filter-chip${filter.scope === sc.key ? ' on' : ''}`, () => {
+                filter.scope = sc.key;
+                renderNext(true);
+            }));
+        });
+        const labels = [...new Set(steps.flatMap((s) => s.labels || []))].sort();
+        labels.forEach((l) => {
+            const chip = A.button('', `filter-chip label-filter${filter.label === l ? ' on' : ''}`, () => {
+                filter.label = filter.label === l ? '' : l;
+                renderNext(true);
+            });
+            chip.style.setProperty('--label', A.steps.labelColor(l));
+            chip.appendChild(A.el('span', 'label-dot'));
+            chip.appendChild(A.el('span', null, l));
+            bar.appendChild(chip);
+        });
+        if (steps.some(A.steps.isFocus)) {
+            const load = A.steps.weekLoad(allDocs());
+            const meter = A.steps.capacityMeter(load, A.steps.capacity());
+            meter.classList.add('step-filters-capacity');
+            meter.title = `${meter.title}, across all projects`;
+            bar.appendChild(meter);
+        }
+        if (bar.children.length > 1) host.appendChild(bar);
+    }
+
+    function renderNext(force) {
         const host = document.getElementById('next-body');
         // Never pull a field out from under someone typing in it.
-        const typing = document.activeElement?.closest?.('#next-body .step-detail');
-        if (typing && /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName)) return;
+        const a = document.activeElement;
+        if (!force && a?.closest?.('#next-body .step-detail') && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) return;
         A.clear(host);
-        document.getElementById('next-count').textContent = String(ws().next.length);
+        renderCounts();
+        renderStepTools();
 
-        const form = A.el('form', 'quick-add compact');
-        form.style.marginBottom = '0.6rem';
-        const text = A.el('input', 'qa-title');
-        text.type = 'text';
-        text.placeholder = 'What\'s the next step?';
-        text.setAttribute('aria-label', 'Next step');
-        const due = A.el('input');
-        due.type = 'date';
-        due.setAttribute('aria-label', 'Due date');
-        const prio = A.el('select');
-        prio.setAttribute('aria-label', 'Priority');
-        A.PRIORITIES.forEach((p) => {
-            const o = A.el('option', null, p.label);
-            o.value = p.value;
-            if (p.value === 'medium') o.selected = true;
-            prio.appendChild(o);
+        const quick = A.steps.quickAdd({
+            compact: true,
+            onAdd: (parsed) => {
+                const s = A.steps.create(parsed);
+                ws().next.push(s);
+                save(true);
+                renderWorkspace(true);
+                document.querySelector('#next-body .qa-title')?.focus();
+                if (parsed.focus) A.steps.warnIfOver(allDocs());
+                if (parsed.refs.length) loadRefs(parsed.refs).then(() => renderNext());
+            },
         });
-        const add = A.el('button', 'btn btn-add-primary btn-small', 'Add');
-        add.type = 'submit';
-        [text, due, prio, add].forEach((n) => form.appendChild(n));
-        form.addEventListener('submit', (e) => {
-            e.preventDefault();
-            const value = text.value.trim();
-            if (!value) { text.focus(); return; }
-            ws().next.push({ id: A.uid(), text: value, due: due.value, time: '', priority: prio.value, details: '', checklist: [], createdAt: new Date().toISOString() });
-            save(true);
-            renderWorkspace();
-            document.querySelector('#next-body .qa-title')?.focus();
-        });
-        host.appendChild(form);
+        host.appendChild(quick);
 
+        ws().next.forEach(A.steps.normalize);
         if (!ws().next.length) {
             host.appendChild(A.el('p', 'hint', 'No next steps. Write down what you\'ll do the next time you sit down with this, then open it to add details and smaller steps.'));
             return;
         }
+        renderFilters(host);
 
-        const rows = A.el('div', 'step-list');
-        sortSteps(ws().next).forEach((s) => rows.appendChild(stepCard(s)));
-        host.appendChild(rows);
+        const scope = SCOPES.find((x) => x.key === filter.scope) || SCOPES[0];
+        const list = A.steps.sort(ws().next.filter((s) => scope.test(s) && (!filter.label || s.labels.includes(filter.label))));
+        if (!list.length) {
+            host.appendChild(A.el('p', 'hint', 'Nothing matches this filter.'));
+            return;
+        }
+        if (prefs.stepView === 'board') {
+            host.appendChild(A.steps.board(list.map((s) => ({ s, ctx: stepCtx() })), { onMove: () => renderWorkspace(true) }));
+        } else {
+            const rows = A.el('div', 'step-list');
+            list.forEach((s) => rows.appendChild(A.steps.card(s, stepCtx())));
+            host.appendChild(rows);
+        }
     }
 
     // Opened from elsewhere (Up next, calendar) as project.html?id=…#step=<id>.
@@ -338,16 +209,70 @@
         const id = new URLSearchParams(window.location.hash.slice(1)).get('step');
         if (!id || !ws().next.some((s) => s.id === id)) return;
         state.expanded.add(id);
-        renderNext();
-        document.getElementById(`step-${id}`)?.scrollIntoView({ block: 'center' });
+        filter.scope = 'all';
+        filter.label = '';
+        renderNext(true);
+        document.querySelector(`[data-key="${CSS.escape(id)}"]`)?.scrollIntoView({ block: 'center' });
     }
 
     // ------------------------------------------------------------ achieved --
+    //
+    // A record of progress that doubles as release notes: group it by month
+    // or by version, and copy it out as a Markdown changelog.
+
+    function versions() {
+        return [...new Set(ws().achieved.map((a) => a.version).filter(Boolean))];
+    }
+
+    function versionTag(a) {
+        const wrap = A.el('span', 'achieved-version');
+        const show = () => {
+            A.clear(wrap);
+            const b = A.button(a.version || '+ version', a.version ? 'version-chip' : 'link-btn version-add', edit);
+            b.title = a.version ? 'Change version' : 'Put this in a release';
+            wrap.appendChild(b);
+        };
+        const edit = () => {
+            A.clear(wrap);
+            const input = A.el('input', 'version-input');
+            input.type = 'text';
+            input.value = a.version || '';
+            input.placeholder = 'v1.2';
+            input.setAttribute('aria-label', 'Version');
+            const listId = `versions-${a.id}`;
+            input.setAttribute('list', listId);
+            const dl = A.el('datalist');
+            dl.id = listId;
+            versions().forEach((v) => { const o = A.el('option'); o.value = v; dl.appendChild(o); });
+            let doneEditing = false;
+            const commit = (keep) => {
+                if (doneEditing) return;
+                doneEditing = true;
+                if (keep) {
+                    const v = input.value.trim();
+                    if (v) a.version = v; else delete a.version;
+                    save(true);
+                    if (prefs.achievedBy === 'version') { renderAchieved(); return; }
+                }
+                show();
+            };
+            input.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') { e.preventDefault(); commit(true); }
+                if (e.key === 'Escape') commit(false);
+            });
+            input.addEventListener('blur', () => commit(true));
+            wrap.appendChild(input);
+            wrap.appendChild(dl);
+            input.focus();
+        };
+        show();
+        return wrap;
+    }
 
     // A finished step keeps its details and checklist, read-only, behind a
     // small toggle; move it back to Next steps to edit them.
     function achievedDetail(a, body) {
-        const { done, total } = checklistProgress(a);
+        const { done, total } = A.steps.checklistProgress(a);
         const details = (a.details || '').trim();
         if (!total && !details) return;
         const more = A.el('div', 'achieved-more');
@@ -367,9 +292,64 @@
         body.appendChild(more);
     }
 
+    function achievedItem(a) {
+        const item = A.el('div', 'achieved-item item-row');
+        item.appendChild(A.el('span', 'achieved-dot'));
+        const body = A.el('div', 'achieved-body');
+        const line = A.el('div', 'achieved-line');
+        line.appendChild(A.el('span', 'achieved-text', a.text));
+        (a.labels || []).forEach((l) => line.appendChild(A.steps.labelChip(l)));
+        body.appendChild(line);
+        const sub = A.el('div', 'achieved-date');
+        if (a.date) sub.appendChild(A.el('span', null, A.parseDate(a.date).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })));
+        if (a.closedBy) sub.appendChild(A.el('span', null, `· via ${a.closedBy}`));
+        sub.appendChild(versionTag(a));
+        body.appendChild(sub);
+        achievedDetail(a, body);
+        item.appendChild(body);
+        const actions = A.el('div', 'item-actions');
+        actions.appendChild(A.iconButton('refresh', 'Move back to next steps', () => {
+            A.items.reopenStep(ws(), a.id);
+            save(true);
+            renderWorkspace(true);
+        }, 'icon-btn sm'));
+        actions.appendChild(A.iconButton('trash', 'Delete', () => {
+            ws().achieved = ws().achieved.filter((x) => x.id !== a.id);
+            save(true);
+            renderWorkspace(true);
+        }, 'icon-btn sm danger'));
+        item.appendChild(actions);
+        return item;
+    }
+
+    function renderAchievedTools() {
+        const host = A.clear(document.getElementById('achieved-tools'));
+        [['month', 'By month'], ['version', 'By version']].forEach(([key, label]) => {
+            const b = A.button(label, `filter-chip${prefs.achievedBy === key ? ' on' : ''}`, () => {
+                prefs.achievedBy = key;
+                savePrefs();
+                renderAchieved();
+            });
+            b.setAttribute('aria-pressed', String(prefs.achievedBy === key));
+            host.appendChild(b);
+        });
+        if (!ws().achieved.length) return;
+        const copy = A.iconButton('download', 'Copy as a Markdown changelog', async () => {
+            const text = A.steps.changelog(ws().achieved, prefs.achievedBy, projectName());
+            try {
+                await navigator.clipboard.writeText(text);
+                A.toast('Changelog copied', 'ok');
+            } catch {
+                A.modal.open({ title: 'Changelog', fields: [{ name: 'text', label: 'Markdown', type: 'textarea', rows: 14, value: text }], submitLabel: 'Close', onSubmit: () => {} });
+            }
+        }, 'icon-btn sm');
+        host.appendChild(copy);
+    }
+
     function renderAchieved() {
         const host = A.clear(document.getElementById('achieved-body'));
         document.getElementById('achieved-count').textContent = String(ws().achieved.length);
+        renderAchievedTools();
 
         const form = A.el('form', 'quick-add compact');
         form.style.marginBottom = '0.6rem';
@@ -386,57 +366,150 @@
         [text, date, add].forEach((n) => form.appendChild(n));
         form.addEventListener('submit', (e) => {
             e.preventDefault();
-            const value = text.value.trim();
-            if (!value) { text.focus(); return; }
-            ws().achieved.unshift({ id: A.uid(), text: value, date: date.value || A.todayKey() });
+            const parsed = A.steps.parseQuick(text.value);
+            if (!parsed.text) { text.focus(); return; }
+            ws().achieved.unshift({ id: A.uid(), text: parsed.text, labels: parsed.labels, refs: parsed.refs, date: date.value || A.todayKey() });
             ws().achieved.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
             save(true);
-            renderWorkspace();
+            renderWorkspace(true);
         });
         host.appendChild(form);
 
         if (!ws().achieved.length) {
-            host.appendChild(A.el('p', 'hint', 'Tick off a next step, or log a win here, and it builds a record of progress.'));
+            host.appendChild(A.el('p', 'hint', 'Tick off a next step, or log a win here, and it builds a record of progress. Give items a version to turn it into release notes.'));
             return;
         }
 
-        const list = A.el('div', 'achieved-list');
-        ws().achieved.forEach((a) => {
-            const item = A.el('div', 'achieved-item item-row');
-            item.appendChild(A.el('span', 'achieved-dot'));
-            const body = A.el('div', 'achieved-body');
-            body.appendChild(A.el('div', 'achieved-text', a.text));
-            if (a.date) body.appendChild(A.el('div', 'achieved-date', A.parseDate(a.date).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })));
-            achievedDetail(a, body);
-            item.appendChild(body);
-            const actions = A.el('div', 'item-actions');
-            actions.appendChild(A.iconButton('refresh', 'Move back to next steps', () => {
-                A.items.reopenStep(ws(), a.id);
-                save(true);
-                renderWorkspace();
-            }, 'icon-btn sm'));
-            actions.appendChild(A.iconButton('trash', 'Delete', () => {
-                ws().achieved = ws().achieved.filter((x) => x.id !== a.id);
-                save(true);
-                renderWorkspace();
-            }, 'icon-btn sm danger'));
-            item.appendChild(actions);
-            list.appendChild(item);
+        const untagged = ws().achieved.filter((a) => !a.version);
+        if (prefs.achievedBy === 'version' && untagged.length) {
+            const tagAll = A.button(`Put ${untagged.length} untagged in a version…`, 'link-btn achieved-tag-all', () => {
+                A.modal.open({
+                    title: 'Cut a version',
+                    description: `Tags the ${untagged.length} item${untagged.length === 1 ? '' : 's'} not in a version yet.`,
+                    fields: [{ name: 'version', label: 'Version', required: true, placeholder: 'v1.2' }],
+                    submitLabel: 'Tag them',
+                    onSubmit: (v) => {
+                        untagged.forEach((a) => { a.version = v.version.trim(); });
+                        save(true);
+                        renderAchieved();
+                    },
+                });
+            });
+            host.appendChild(tagAll);
+        }
+
+        A.steps.groupAchieved(ws().achieved, prefs.achievedBy).forEach((g) => {
+            host.appendChild(A.el('div', 'group-head achieved-group', `${g.label} · ${g.items.length}`));
+            const list = A.el('div', 'achieved-list');
+            g.items.forEach((a) => list.appendChild(achievedItem(a)));
+            host.appendChild(list);
         });
-        host.appendChild(list);
     }
 
     // ------------------------------------------------------- notes/details --
+    //
+    // Notes are one free-form page. Decisions are dated entries — what was
+    // decided and why — so the reasoning stays findable later.
+
+    function renderNotesTabs() {
+        const host = A.clear(document.getElementById('notes-tools'));
+        const count = (ws().decisions || []).length;
+        [['notes', 'Notes'], ['decisions', `Decisions${count ? ` ${count}` : ''}`]].forEach(([key, label]) => {
+            const b = A.button(label, `filter-chip${prefs.notesTab === key ? ' on' : ''}`, () => {
+                prefs.notesTab = key;
+                savePrefs();
+                renderNotes();
+            });
+            b.setAttribute('aria-pressed', String(prefs.notesTab === key));
+            host.appendChild(b);
+        });
+    }
+
+    function decisionEntry(d) {
+        const item = A.el('article', 'decision');
+        const head = A.el('div', 'decision-head');
+        const date = A.el('input', 'decision-date');
+        date.type = 'date';
+        date.value = d.date || '';
+        date.setAttribute('aria-label', 'Date decided');
+        date.addEventListener('change', () => { d.date = date.value; save(true); });
+        const title = A.el('input', 'decision-title');
+        title.type = 'text';
+        title.value = d.title || '';
+        title.placeholder = 'What was decided';
+        title.setAttribute('aria-label', 'Decision');
+        title.addEventListener('input', () => { d.title = title.value; save(); });
+        head.appendChild(title);
+        head.appendChild(date);
+        head.appendChild(A.iconButton('trash', 'Delete decision', async () => {
+            const ok = await A.confirm({ title: `Delete "${d.title || 'this decision'}"?`, confirmLabel: 'Delete', danger: true });
+            if (!ok) return;
+            ws().decisions = ws().decisions.filter((x) => x.id !== d.id);
+            save(true);
+            renderNotes();
+        }, 'icon-btn sm danger'));
+        item.appendChild(head);
+        const why = A.el('textarea', 'decision-why');
+        why.rows = 2;
+        why.value = d.why || '';
+        why.placeholder = 'Why: the options, the trade-off, what would change your mind…';
+        why.setAttribute('aria-label', 'Why');
+        why.addEventListener('input', () => { d.why = why.value; save(); });
+        requestAnimationFrame(() => { why.style.height = 'auto'; why.style.height = `${why.scrollHeight + 2}px`; });
+        why.addEventListener('input', () => { why.style.height = 'auto'; why.style.height = `${why.scrollHeight + 2}px`; });
+        item.appendChild(why);
+        return item;
+    }
 
     function renderNotes() {
         const host = A.clear(document.getElementById('notes-body'));
-        const ta = A.el('textarea');
-        ta.rows = 12;
-        ta.value = ws().notes || '';
-        ta.placeholder = 'Thinking, design, architecture, decisions…';
-        ta.setAttribute('aria-label', 'Notes');
-        ta.addEventListener('input', () => { ws().notes = ta.value; save(); });
-        host.appendChild(ta);
+        if (!Array.isArray(ws().decisions)) ws().decisions = [];
+        renderNotesTabs();
+        const hint = document.getElementById('notes-hint');
+
+        if (prefs.notesTab === 'notes') {
+            hint.textContent = 'Open questions, design thinking, trade-offs — whatever future you needs.';
+            const ta = A.el('textarea');
+            ta.rows = 12;
+            ta.value = ws().notes || '';
+            ta.placeholder = 'Thinking, design, architecture…';
+            ta.setAttribute('aria-label', 'Notes');
+            ta.addEventListener('input', () => { ws().notes = ta.value; save(); });
+            host.appendChild(ta);
+            return;
+        }
+
+        hint.textContent = 'A dated log of what you decided and why, newest first.';
+        const form = A.el('form', 'quick-add compact');
+        form.style.marginBottom = '0.6rem';
+        const text = A.el('input', 'qa-title');
+        text.type = 'text';
+        text.placeholder = 'Record a decision…';
+        text.setAttribute('aria-label', 'New decision');
+        const add = A.el('button', 'btn btn-edit btn-small', 'Add');
+        add.type = 'submit';
+        form.appendChild(text);
+        form.appendChild(add);
+        form.addEventListener('submit', (e) => {
+            e.preventDefault();
+            if (!text.value.trim()) { text.focus(); return; }
+            const d = { id: A.uid(), date: A.todayKey(), title: text.value.trim(), why: '' };
+            ws().decisions.unshift(d);
+            save(true);
+            renderNotes();
+            document.querySelector('#notes-body .decision-why')?.focus();
+        });
+        host.appendChild(form);
+
+        if (!ws().decisions.length) {
+            host.appendChild(A.el('p', 'hint', 'Nothing logged yet. When you pick a library, an approach or a trade-off, note it here with the reason.'));
+            return;
+        }
+        const list = A.el('div', 'decision-list');
+        [...ws().decisions]
+            .sort((a, b) => (b.date || '').localeCompare(a.date || ''))
+            .forEach((d) => list.appendChild(decisionEntry(d)));
+        host.appendChild(list);
     }
 
     function fieldRow(label, input) {
@@ -540,8 +613,8 @@
         }
     }
 
-    function renderWorkspace() {
-        renderNext();
+    function renderWorkspace(force) {
+        renderNext(force);
         renderAchieved();
         renderSidebar();
     }
@@ -756,8 +829,10 @@
                 label: projectName(),
                 items: [
                     { label: 'Next steps', icon: 'upnext', href: '#sec-next', count: ws()?.next.length || '' },
+                    { label: 'This week', icon: 'flag', count: ws()?.next.filter(A.steps.isFocus).length || '', onClick: () => { filter.scope = 'week'; renderNext(true); document.getElementById('sec-next').scrollIntoView(); } },
+                    { label: 'Blocked', icon: 'alert', count: ws()?.next.filter((s) => A.steps.statusOf(s) === 'blocked').length || '', countTone: 'danger', onClick: () => { filter.scope = 'blocked'; renderNext(true); document.getElementById('sec-next').scrollIntoView(); } },
                     { label: 'Achieved', icon: 'check', href: '#sec-achieved', count: ws()?.achieved.length || '' },
-                    { label: 'Notes', icon: 'pencil', href: '#sec-notes' },
+                    { label: 'Notes & decisions', icon: 'pencil', href: '#sec-notes' },
                     { label: 'Details', icon: 'list', href: '#sec-details' },
                     { label: 'Repository', icon: 'github', href: '#sec-repo' },
                     ...A.projectTools(state.id).map((t) => ({ label: t.label, icon: t.icon || 'pencil', href: t.href })),
@@ -823,6 +898,7 @@
             renderRepoSide();
             openStepFromHash();
             window.addEventListener('hashchange', openStepFromHash);
+            closeStepsByRefs();
         } catch (e) {
             hint.textContent = `Could not load this project: ${e.message}`;
         }

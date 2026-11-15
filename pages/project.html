@@ -28,25 +28,30 @@
             <p class="hint" id="load-hint">Loading project…</p>
 
             <div id="app" style="display:none;">
+                <section class="panel" id="sec-next">
+                    <div class="panel-head">
+                        <h2>Next steps <span class="badge" id="next-count"></span></h2>
+                        <div class="panel-head-actions filter-chips" id="next-tools"></div>
+                    </div>
+                    <div id="next-body"></div>
+                </section>
+
                 <div class="split">
                     <div class="split-stack">
-                        <section class="panel" id="sec-next">
-                            <div class="panel-head">
-                                <h2>Next steps <span class="badge" id="next-count"></span></h2>
-                            </div>
-                            <div id="next-body"></div>
-                        </section>
-
                         <section class="panel" id="sec-achieved">
                             <div class="panel-head">
                                 <h2>Achieved <span class="badge" id="achieved-count"></span></h2>
+                                <div class="panel-head-actions filter-chips" id="achieved-tools"></div>
                             </div>
                             <div id="achieved-body"></div>
                         </section>
 
                         <section class="panel" id="sec-notes">
-                            <h2>Notes</h2>
-                            <p class="hint">Open questions, design decisions, trade-offs — whatever future you needs.</p>
+                            <div class="panel-head">
+                                <h2>Notes</h2>
+                                <div class="panel-head-actions filter-chips" id="notes-tools"></div>
+                            </div>
+                            <p class="hint" id="notes-hint"></p>
                             <div id="notes-body"></div>
                         </section>
                     </div>
@@ -78,6 +83,7 @@
 <script src="../js/modal.js"></script>
 <script src="../js/store.js"></script>
 <script src="../js/items.js"></script>
+<script src="../js/steps.js"></script>
 <script src="../js/project.js"></script>
 </body>
 </html>

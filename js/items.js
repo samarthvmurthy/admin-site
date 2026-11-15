@@ -315,10 +315,15 @@
         return wrap;
     }
 
-    // "Project · 2/5 steps" when a next step has a checklist.
+    // "Project · In progress · 2/5 steps", or who a blocked step waits on.
     function stepContext(project, s) {
         const list = s.checklist || [];
-        return list.length ? `${project} · ${list.filter((c) => c.done).length}/${list.length} steps` : project;
+        return [
+            project,
+            s.status === 'doing' ? 'In progress' : '',
+            s.status === 'blocked' ? (s.waitingOn ? `Waiting on ${s.waitingOn}` : 'Blocked') : '',
+            list.length ? `${list.filter((c) => c.done).length}/${list.length} steps` : '',
+        ].filter(Boolean).join(' · ');
     }
 
     function collect({ plan, workspaces, projectNames = {} }) {
@@ -348,8 +353,11 @@
 
         Object.entries(workspaces || {}).forEach(([id, ws]) => {
             (ws.next || []).forEach((s) => {
+                // A blocked step comes up on its follow-up day, to chase it.
+                const chase = s.status === 'blocked' && s.followUp;
                 out.push({
-                    key: `step:${id}:${s.id}`, kind: 'step', title: s.text, due: s.due || '', time: s.time || '',
+                    key: `step:${id}:${s.id}`, kind: 'step', title: chase ? `Follow up: ${s.text}` : s.text,
+                    due: chase ? s.followUp : s.due || '', time: chase ? '' : s.time || '',
                     priority: s.priority || 'medium', context: stepContext(projectNames[id] || ws.projectName || A.projectLabel(id), s),
                     href: `${A.projectHref(id).replace(/^\.\.\//, '')}#step=${encodeURIComponent(s.id)}`, refId: s.id, ownerId: id,
                 });

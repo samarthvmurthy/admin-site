@@ -21,6 +21,8 @@
     ];
 
     let projects = []; // [{ id, name }] for linking a roadmap to a project
+    // Project next steps linked to a milestone: milestone id → [{ projectId, name, step, done }]
+    let linkedSteps = new Map();
     const plan = () => store.doc;
 
     document.getElementById('topbar-actions').appendChild(A.store.indicator());
@@ -485,6 +487,42 @@
         if (index !== -1) (focusables()[index] || focusables().pop())?.focus();
     }
 
+    // The project work behind a milestone: next steps linked to it from a
+    // project page. Read-only here; each links to its step.
+    function linkedWork(it) {
+        const list = linkedSteps.get(it.id);
+        if (!list?.length) return null;
+        const wrap = A.el('div', 'ms-linked');
+        const done = list.filter((x) => x.done).length;
+        const head = A.el('div', 'ms-linked-head');
+        head.appendChild(A.icon('projects', 12));
+        head.appendChild(A.el('span', null, `Project work · ${done}/${list.length} done`));
+        wrap.appendChild(head);
+        list.forEach((x) => {
+            const a = A.el('a', `ms-linked-step${x.done ? ' done' : ''}`);
+            a.href = x.done ? A.projectHref(x.projectId) : `${A.projectHref(x.projectId)}#step=${encodeURIComponent(x.step.id)}`;
+            a.appendChild(A.icon(x.done ? 'check' : 'chevronRight', 11));
+            a.appendChild(A.el('span', 'grow', x.step.text));
+            a.appendChild(A.el('span', 'ms-linked-project', x.name));
+            wrap.appendChild(a);
+        });
+        return wrap;
+    }
+
+    function indexLinkedSteps(workspaces) {
+        linkedSteps = new Map();
+        Object.entries(workspaces || {}).forEach(([id, w]) => {
+            const name = projects.find((p) => p.id === id)?.name || w.projectName || A.projectLabel(id);
+            const add = (step, done) => {
+                if (!step.milestone?.id) return;
+                if (!linkedSteps.has(step.milestone.id)) linkedSteps.set(step.milestone.id, []);
+                linkedSteps.get(step.milestone.id).push({ projectId: id, name, step, done });
+            };
+            (w.next || []).forEach((st) => add(st, false));
+            (w.achieved || []).forEach((st) => add(st, true));
+        });
+    }
+
     function phaseCard(r, p, index) {
         const today = A.todayKey();
         const done = phaseDone(p);
@@ -585,6 +623,8 @@
             }, 'icon-btn sm danger'));
             body.appendChild(row);
             body.appendChild(subtasks);
+            const linked = linkedWork(it);
+            if (linked) body.appendChild(linked);
         });
 
         const add = A.el('input', 'inline-add');
@@ -795,11 +835,16 @@
         }
         render();
         // Project names for roadmap links; not needed for first paint.
-        Promise.all([A.api('/projects').catch(() => []), A.api('/repos').catch(() => [])]).then(([custom, repos]) => {
+        Promise.all([
+            A.api('/projects').catch(() => []),
+            A.api('/repos').catch(() => []),
+            A.api('/workspaces').catch(() => ({})),
+        ]).then(([custom, repos, workspaces]) => {
             projects = [
                 ...custom.map((p) => ({ id: p.id, name: p.name })),
                 ...repos.filter((x) => !x.archived).map((x) => ({ id: `gh:${x.full_name}`, name: x.name })),
             ].sort((a, b) => a.name.localeCompare(b.name));
+            indexLinkedSteps(workspaces);
             if (route().kind === 'roadmap') render();
         });
     }

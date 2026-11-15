@@ -202,6 +202,31 @@ async function handleGetRepoDetail(env, url) {
   });
 }
 
+// Status of specific issues / PRs, for next steps linked to them. The issues
+// endpoint covers both; PRs carry pull_request.merged_at.
+async function handleGetRepoRefs(env, url) {
+  const repo = url.searchParams.get('repo');
+  if (!repo || !/^[\w.-]+\/[\w.-]+$/.test(repo)) {
+    return json({ error: 'repo query param required (owner/name)' }, 400);
+  }
+  const numbers = [...new Set(String(url.searchParams.get('n') || '').split(',').map(Number))]
+    .filter((n) => Number.isInteger(n) && n > 0)
+    .slice(0, 30);
+  const out = await Promise.all(numbers.map(async (number) => {
+    const i = await ghJson(env, `/repos/${repo}/issues/${number}`, null);
+    if (!i || typeof i !== 'object' || !i.number) return { number, missing: true };
+    return {
+      number,
+      title: i.title,
+      url: i.html_url,
+      isPull: Boolean(i.pull_request),
+      state: i.state,
+      merged: Boolean(i.pull_request?.merged_at),
+    };
+  }));
+  return json(out);
+}
+
 // ------------------------------------------------------------ kv storage ----
 //
 // Key layout (one JSON document per key):
@@ -246,7 +271,7 @@ function requestTimeZone(request) {
 // ------------------------------------------------------------------ plan ----
 
 function emptyPlan() {
-  return { tasks: [], roadmaps: [], timeZone: '', calOrphans: [], updatedAt: null };
+  return { tasks: [], roadmaps: [], stepTemplates: [], weekCapacity: 12, timeZone: '', calOrphans: [], updatedAt: null };
 }
 
 function normalizePlan(body) {
@@ -256,6 +281,12 @@ function normalizePlan(body) {
       ...r,
       phases: arr(r.phases).filter(withId).map((p) => ({ ...p, items: arr(p.items).filter(withId).map(settleMilestone) })),
     })),
+    // Checklist templates and weekly capacity, shared by every project.
+    stepTemplates: arr(body.stepTemplates).filter(withId).map((t) => ({
+      id: t.id, name: String(t.name || 'Template').slice(0, 120),
+      items: arr(t.items).map((x) => String(x).slice(0, 300)).filter(Boolean).slice(0, 100),
+    })),
+    weekCapacity: Math.min(200, Math.max(1, Math.round(Number(body.weekCapacity)) || 12)),
   };
 }
 
@@ -404,6 +435,7 @@ function emptyWorkspace() {
     next: [],       // [{ id, text, due, time, priority, details, checklist: [{ id, text, done }], createdAt }]
     achieved: [],   // [{ ...next step, date }]
     notes: '',
+    decisions: [],  // [{ id, date, title, why }]
     links: [],
     timeZone: '',
     calOrphans: [],
@@ -420,6 +452,7 @@ function normalizeWorkspace(body) {
     next: arr(body.next).filter(withId),
     achieved: arr(body.achieved).filter(withId),
     notes: String(body.notes || ''),
+    decisions: arr(body.decisions).filter(withId),
     links: arr(body.links).filter((l) => l && typeof l === 'object'),
   };
 }
@@ -779,7 +812,12 @@ function stepSpec(ws, projectId, s, done) {
   return {
     summary: `${done ? '✓' : '○'} ${s.text || 'Next step'} · ${project}`,
     description: [
-      s.priority ? `Priority: ${s.priority}` : '',
+      [
+        s.status === 'doing' ? 'In progress' : s.status === 'blocked' ? `Blocked${s.waitingOn ? `: waiting on ${s.waitingOn}` : ''}` : '',
+        s.priority ? `Priority: ${s.priority}` : '',
+        s.size ? `Size: ${String(s.size).toUpperCase()}` : '',
+        arr(s.labels).length ? `Labels: ${arr(s.labels).join(', ')}` : '',
+      ].filter(Boolean).join(' · '),
       String(s.details || '').trim(),
       arr(s.checklist).length ? arr(s.checklist).map((c) => `${c.done ? '☑' : '☐'} ${c.text || ''}`).join('\n') : '',
       `Project: ${SITE_URL}/pages/project.html?id=${enc(projectId)}#step=${enc(s.id)}`,
@@ -1088,6 +1126,7 @@ const ROUTES = [
   ['PUT',    '/api/data',               (c) => handlePutData(c.env, c.request)],
   ['GET',    '/api/repos',              (c) => handleGetRepos(c.env)],
   ['GET',    '/api/repo',               (c) => handleGetRepoDetail(c.env, c.url)],
+  ['GET',    '/api/repo/refs',          (c) => handleGetRepoRefs(c.env, c.url)],
   ['GET',    '/api/languages',          (c) => handleGetLanguages(c.env, c.url)],
   ['GET',    '/api/plan',               (c) => handleGetPlan(c.env)],
   ['PUT',    '/api/plan',               (c) => handlePutPlan(c.env, c.request)],
