@@ -18,29 +18,31 @@
             <button class="menu-toggle" id="menu-toggle" aria-label="Open menu"></button>
             <div class="topbar-title">
                 <h1>Jobs</h1>
-                <p>Applications, interviews and follow-ups.</p>
+                <p id="runner-status" class="runner-status">Connecting…</p>
             </div>
-            <div class="topbar-actions"></div>
+            <div class="topbar-actions" id="topbar-actions"></div>
         </header>
 
-        <main class="narrow">
-            <section class="panel">
-                <div class="empty-state">
-                    <strong>Integration coming soon</strong>
-                    This module will plug in your job-tracking project. Once it's connected, application deadlines and
-                    interviews will flow into Up next and your calendar like everything else here.
-                </div>
-            </section>
+        <main>
+            <div id="jobs-banners"></div>
+            <div id="jobs-view"></div>
         </main>
     </div>
 </div>
 
+<div class="modal-backdrop" id="modal-backdrop"></div>
+
+<!-- Reports are Markdown that quotes job descriptions from the web, so they
+     are rendered with marked and sanitised with DOMPurify before display. -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"
+        integrity="sha384-/TQbtLCAerC3jgaim+N78RZSDYV7ryeoBCVqTuzRrFec2akfBkHS7ACQ3PQhvMVi"
+        crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js"
+        integrity="sha384-+VfUPEb0PdtChMwmBcBmykRMDd+v6D/oFmB3rZM/puCMDYcIvF968OimRh4KQY9a"
+        crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 <script src="../js/nav.js"></script>
-<script>
-    window.Nav.setSections([{
-        label: 'Jobs',
-        items: [{ label: 'Overview', icon: 'jobs', active: true, href: 'pages/jobs.html' }],
-    }]);
-</script>
+<script src="../js/common.js"></script>
+<script src="../js/modal.js"></script>
+<script src="../js/jobs.js"></script>
 </body>
 </html>

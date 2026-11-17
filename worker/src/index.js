@@ -1,3 +1,5 @@
+import { JOB_ROUTES, pruneRuns } from './jobs.js';
+
 const GITHUB_API = 'https://api.github.com';
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const GCAL_API = 'https://www.googleapis.com/calendar/v3';
@@ -1151,6 +1153,7 @@ const ROUTES = [
   ['POST',   '/api/calendar/events',    (c) => handleCreateEvent(c.env, c.request, c.url)],
   ['PATCH',  '/api/calendar/events',    (c) => handleUpdateEvent(c.env, c.request, c.url)],
   ['DELETE', '/api/calendar/events',    (c) => handleDeleteEvent(c.env, c.url)],
+  ...JOB_ROUTES,
 ];
 
 export default {
@@ -1166,5 +1169,10 @@ export default {
     } catch (e) {
       return json({ error: e.message || 'Internal error' }, e.status || 500);
     }
+  },
+
+  // Daily housekeeping (cron in wrangler.toml).
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(pruneRuns(env));
   },
 };

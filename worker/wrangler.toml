@@ -22,8 +22,24 @@ GITHUB_FILE_PATH = "data.json"
 binding = "WORKSPACE"
 id = "b74cfaa1ca5f4a18b046b818107f9505"
 
+# Jobs module: run queue for the Dell runner + mirror of career-ops files.
+# Create once, paste the printed database_id below, then apply migrations:
+#   npx wrangler d1 create admin-jobs
+#   npx wrangler d1 migrations apply admin-jobs --remote
+[[d1_databases]]
+binding = "JOBS_DB"
+database_name = "admin-jobs"
+database_id = "75b71a26-6f2d-451f-b2bc-17185d5d2170"
+migrations_dir = "migrations"
+
+# Daily housekeeping (prunes job runs older than 30 days).
+[triggers]
+crons = ["0 3 * * *"]
+
 # Secrets — set each one with `npx wrangler secret put <NAME>`:
 #   GITHUB_TOKEN           repo-scoped personal access token
 #   GOOGLE_CLIENT_ID       OAuth client id      (see scripts/google-auth.mjs)
 #   GOOGLE_CLIENT_SECRET   OAuth client secret  (see scripts/google-auth.mjs)
 #   GOOGLE_REFRESH_TOKEN   printed by `node scripts/google-auth.mjs`
+#   RUNNER_TOKEN           shared secret for the Dell runner (any long random string;
+#                          the same value goes in runner/.env on the Dell)

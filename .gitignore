@@ -5,3 +5,7 @@ worker/.wrangler/
 .DS_Store
 .env
 worker/.env
+runner/.env
+runner/runner.log
+runner/runner.log.1
+*.zip
