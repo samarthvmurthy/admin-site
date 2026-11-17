@@ -12,6 +12,7 @@
         repos: null,
         events: [],
         calendar: { configured: null },
+        jobs: null,        // /api/jobs snapshot; { error } if it failed
     };
 
     document.querySelectorAll('[data-icon]').forEach((n) => { n.innerHTML = window.Nav.svg(n.dataset.icon, 17); });
@@ -320,6 +321,82 @@
 
     }
 
+    // ---------------------------------------------------------------- jobs --
+
+    const JOB_ACTIVE = ['Applied', 'Responded', 'Assessment', 'Interview', 'Offer'];
+
+    function jobCounts() {
+        const j = state.jobs;
+        if (!j || j.error) return null;
+        const rows = j.tracker || [];
+        const meta = j.meta?.followups?.metadata || {};
+        return {
+            toReview: rows.filter((r) => r.status === 'Evaluated').length,
+            active: rows.filter((r) => JOB_ACTIVE.includes(r.status)).length,
+            followupsDue: (meta.overdue || 0) + (meta.urgent || 0),
+            inbox: j.pipeline?.pending?.length || 0,
+        };
+    }
+
+    function renderJobs() {
+        const host = A.clear(document.getElementById('jobs-body'));
+        const sub = document.getElementById('jobs-sub');
+        const j = state.jobs;
+        if (!j) {
+            host.appendChild(A.el('p', 'hint', 'Loading…'));
+            return;
+        }
+        if (j.error) {
+            sub.textContent = 'Applications & pipeline';
+            host.appendChild(A.el('p', 'hint', `Couldn’t load jobs: ${j.error}`));
+            return;
+        }
+
+        const c = jobCounts();
+        const stats = A.el('div', 'stat-row');
+        stats.appendChild(stat(c.toReview, 'To review', c.toReview ? 'accent' : '', 'pages/jobs.html#pipeline'));
+        stats.appendChild(stat(c.active, 'Active', '', 'pages/jobs.html#pipeline'));
+        stats.appendChild(stat(c.followupsDue, 'Follow-ups due', c.followupsDue ? 'danger' : '', 'pages/jobs.html#insights'));
+        host.appendChild(stats);
+
+        // Best-scoring postings still waiting for a decision.
+        const top = (j.tracker || [])
+            .filter((r) => r.status === 'Evaluated')
+            .sort((a, b) => (b.scoreValue ?? -1) - (a.scoreValue ?? -1))
+            .slice(0, 4);
+        host.appendChild(A.el('div', 'mini-label', 'Top to review'));
+        if (!top.length) {
+            host.appendChild(A.el('p', 'hint', c.inbox
+                ? `${c.inbox} posting${c.inbox === 1 ? '' : 's'} in the inbox, not yet evaluated.`
+                : 'Nothing waiting. Scan portals from the Jobs page.'));
+        } else {
+            const list = A.el('div', 'mini-list');
+            top.forEach((r) => {
+                const row = A.el('a', 'mini-row');
+                row.href = A.pageHref(`pages/jobs.html#job=${r.id}`);
+                row.appendChild(A.el('span', 'grow', `${r.company} — ${r.role}`));
+                row.appendChild(A.el('span', 'dim', r.scoreValue != null ? r.scoreValue.toFixed(1) : '—'));
+                list.appendChild(row);
+            });
+            host.appendChild(list);
+        }
+
+        const r = j.runner || {};
+        sub.textContent = !r.lastSeen ? 'Runner not connected'
+            : r.online ? 'Dell online'
+                : `Dell offline · seen ${A.relativeTime(r.lastSeen)}`;
+    }
+
+    async function loadJobs() {
+        try {
+            state.jobs = await A.api('/jobs');
+        } catch (e) {
+            state.jobs = { error: e.message };
+        }
+        renderJobs();
+        renderSidebar();
+    }
+
     // ------------------------------------------------------------- sidebar --
 
     function renderSidebar() {
@@ -337,7 +414,7 @@
                     { label: 'Up next', href: 'pages/upnext.html', icon: 'upnext', count: urgent || today || '', countTone: urgent ? 'danger' : 'accent' },
                     { label: 'Projects', href: 'pages/projects.html', icon: 'projects' },
                     { label: 'Calendar', href: 'pages/calendar.html', icon: 'calendar' },
-                    { label: 'Jobs', href: 'pages/jobs.html', icon: 'jobs', count: 'soon' },
+                    { label: 'Jobs', href: 'pages/jobs.html', icon: 'jobs', count: jobCounts()?.toReview || '', countTone: jobCounts()?.followupsDue ? 'danger' : '' },
                     { label: 'Milestones', href: '#tile-milestones', icon: 'target' },
                     { label: 'Habit tracker', href: '#habits', icon: 'habits' },
                 ],
@@ -435,6 +512,7 @@
         renderPlan();
         renderMilestones();
         renderCalendar();
+        renderJobs();
         A.habits.mount(document.getElementById('habits-body'), {
             rangeHost: document.getElementById('habit-range'),
             subHost: document.getElementById('habits-sub'),
@@ -464,6 +542,7 @@
         renderMilestones();
         renderProjects();
         renderSidebar();
+        loadJobs();
 
         // Repos are the slow call; fill in names and counts when they land.
         A.api('/repos')

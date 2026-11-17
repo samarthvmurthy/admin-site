@@ -732,7 +732,7 @@ select.toolbar-select { width: auto; flex: 0 0 auto; }
 .tile-upnext   { --tile-color: var(--warn);   --tile-soft: var(--warn-soft); }
 .tile-projects { --tile-color: var(--violet); --tile-soft: var(--violet-soft); }
 .tile-calendar { --tile-color: var(--ok);     --tile-soft: var(--ok-soft); }
-.tile-jobs     { --tile-color: var(--text-dim); --tile-soft: var(--surface-2); }
+.tile-jobs     { --tile-color: var(--text); --tile-soft: var(--surface-2); }
 .tile-habits   { --tile-color: var(--danger); --tile-soft: var(--danger-soft); }
 
 .stat-row { display: flex; gap: 0.5rem; }
