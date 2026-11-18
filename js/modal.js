@@ -38,6 +38,13 @@
         wrap.appendChild(label);
 
         let input;
+        if (field.type === 'custom') {
+            // field.render() → { node, value() }: any control a page needs.
+            const custom = field.render();
+            wrap.appendChild(custom.node);
+            if (field.hint) wrap.appendChild(A.el('div', 'modal-hint', field.hint));
+            return { wrap, input: { custom, focus: () => custom.node.focus?.() } };
+        }
         if (field.type === 'textarea') {
             input = A.el('textarea');
             input.rows = field.rows || 4;
@@ -129,7 +136,7 @@
             e.preventDefault();
             const values = {};
             for (const [name, input] of Object.entries(inputs)) {
-                values[name] = input.type === 'checkbox' ? input.checked : input.value.trim();
+                values[name] = input.custom ? input.custom.value() : input.type === 'checkbox' ? input.checked : input.value.trim();
             }
             submit.disabled = true;
             error.style.display = 'none';

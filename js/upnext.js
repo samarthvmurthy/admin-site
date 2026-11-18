@@ -19,15 +19,45 @@
     ];
 
     const state = {
-        filter: 'all', plan: null, workspaces: {}, names: {}, events: [], calendar: null,
+        filter: 'all', tag: '', plan: null, workspaces: {}, names: {}, events: [], calendar: null,
         calendars: [], showSomeday: false, showSkipped: false, showUndated: false,
         subtasksOpen: new Map(), // milestone id → open or closed, once you've chosen
     };
     const reviewDoc = () => A.store.review.doc;
 
-    function items() {
+    // Everything of the chosen kind, before the tag filter.
+    function kindItems() {
         const all = A.items.collect({ plan: state.plan, workspaces: state.workspaces, projectNames: state.names });
         return state.filter === 'all' ? all : all.filter((i) => i.kind === state.filter);
+    }
+
+    function hasTag(i, tag) {
+        const live = A.tags.resolve(i.tags);
+        return tag === 'none' ? !live.length : live.some((t) => t.id === tag);
+    }
+
+    function items() {
+        // A tag that has since been deleted stops filtering.
+        if (state.tag && state.tag !== 'none' && !A.tags.byId(state.tag)) state.tag = '';
+        const list = kindItems();
+        return state.tag ? list.filter((i) => hasTag(i, state.tag)) : list;
+    }
+
+    function setTagFilter(tag) {
+        state.tag = state.tag === tag ? '' : tag;
+        render();
+    }
+
+    function editTags() {
+        A.tags.manage({ onSave: render });
+    }
+
+    function onTags(item, ids) {
+        A.items.setTags(item, ids);
+        // Re-render once the menu closes, so the row doesn't jump under it.
+        renderTagFilters();
+        renderSidebar();
+        if (state.tag && !hasTag(item, state.tag)) A.toast('Hidden by the tag filter', 'ok');
     }
 
     function refreshFromStore() {
@@ -303,6 +333,36 @@
 
     // --------------------------------------------------------------- list --
 
+    function renderTagFilters() {
+        const host = A.clear(document.getElementById('tag-filters'));
+        if (state.filter === 'subtask') { host.hidden = true; return; }
+        host.hidden = false;
+        const tags = A.tags.list();
+        const base = kindItems();
+        if (!tags.length) {
+            const b = A.button('', 'link-btn tag-filter-new', editTags);
+            b.appendChild(A.icon('tag', 13));
+            b.appendChild(A.el('span', null, 'Create tags to sort your tasks'));
+            host.appendChild(b);
+            return;
+        }
+        host.appendChild(A.icon('tag', 13, 'inline-icon tag-filter-icon'));
+        tags.forEach((t) => {
+            const n = base.filter((i) => hasTag(i, t.id)).length;
+            const chip = A.button('', `filter-chip tag-filter${state.tag === t.id ? ' on' : ''}`, () => setTagFilter(t.id));
+            chip.style.setProperty('--tag', A.tags.COLORS.find((c) => c.value === t.color)?.hex || 'var(--text-dim)');
+            chip.setAttribute('aria-pressed', String(state.tag === t.id));
+            chip.appendChild(A.el('span', 'tag-dot'));
+            chip.appendChild(A.el('span', null, t.name));
+            if (n) chip.appendChild(A.el('span', 'tag-filter-count', String(n)));
+            host.appendChild(chip);
+        });
+        const untagged = A.button('Untagged', `filter-chip${state.tag === 'none' ? ' on' : ''}`, () => setTagFilter('none'));
+        untagged.setAttribute('aria-pressed', String(state.tag === 'none'));
+        host.appendChild(untagged);
+        host.appendChild(A.button('Edit tags', 'link-btn tag-filter-edit', editTags));
+    }
+
     function renderFilters() {
         const host = A.clear(document.getElementById('kind-filters'));
         FILTERS.forEach((f) => {
@@ -400,7 +460,13 @@
         const total = groups.reduce((n, g) => n + g.items.length, 0);
         renderSummary();
 
-        if (!total) {
+        if (!total && state.tag) {
+            const empty = A.el('div', 'empty-state');
+            const name = state.tag === 'none' ? 'untagged' : `tagged ${A.tags.byId(state.tag)?.name}`;
+            empty.appendChild(A.el('strong', null, `Nothing ${name}`));
+            empty.appendChild(A.button('Show everything', 'link-btn', () => setTagFilter(state.tag)));
+            panel.appendChild(empty);
+        } else if (!total) {
             const empty = A.el('div', 'empty-state');
             empty.appendChild(A.el('strong', null, 'All clear'));
             empty.appendChild(document.createTextNode('Add tasks in Plan, next steps on a project, or events from the review list.'));
@@ -418,7 +484,7 @@
 
             const list = g.key === 'someday' && !state.showSomeday ? g.items.slice(0, 5) : g.items;
             const rows = A.el('div', 'row-list');
-            list.forEach((item) => rows.appendChild(A.items.row(item, { onComplete: refreshFromStore })));
+            list.forEach((item) => rows.appendChild(A.items.row(item, { onComplete: refreshFromStore, onTags, onManageTags: editTags })));
             panel.appendChild(rows);
             if (list.length < g.items.length) {
                 panel.appendChild(A.button(`Show ${g.items.length - list.length} more`, 'btn-add', () => { state.showSomeday = true; render(); }));
@@ -448,6 +514,17 @@
                     countTone: g.key === 'overdue' && g.items.length ? 'danger' : g.key === 'today' && g.items.length ? 'accent' : '',
                 })),
             },
+            ...(A.tags.list().length ? [{
+                label: 'Tags',
+                items: A.tags.list().map((t) => ({
+                    label: t.name,
+                    icon: 'tag',
+                    active: state.tag === t.id,
+                    count: kindItems().filter((i) => hasTag(i, t.id)).length || '',
+                    onClick: () => setTagFilter(t.id),
+                })),
+                action: { label: 'Edit tags', icon: 'pencil', onClick: editTags },
+            }] : []),
             {
                 label: 'Milestones',
                 items: [{ label: 'All milestones', icon: 'target', href: '#milestones-panel', count: open.length || '' }],
@@ -465,6 +542,8 @@
     }
 
     function render() {
+        A.tags.close();
+        renderTagFilters();
         renderList();
         renderMilestones();
         renderReview();

@@ -273,7 +273,7 @@ function requestTimeZone(request) {
 // ------------------------------------------------------------------ plan ----
 
 function emptyPlan() {
-  return { tasks: [], roadmaps: [], stepTemplates: [], weekCapacity: 12, timeZone: '', calOrphans: [], updatedAt: null };
+  return { tasks: [], roadmaps: [], stepTemplates: [], weekCapacity: 12, tags: [], timeZone: '', calOrphans: [], updatedAt: null };
 }
 
 function normalizePlan(body) {
@@ -289,6 +289,10 @@ function normalizePlan(body) {
       items: arr(t.items).map((x) => String(x).slice(0, 300)).filter(Boolean).slice(0, 100),
     })),
     weekCapacity: Math.min(200, Math.max(1, Math.round(Number(body.weekCapacity)) || 12)),
+    // Your own tags; tasks, subtasks and steps carry their ids in `tags`.
+    tags: arr(body.tags).filter(withId).slice(0, 100).map((t) => ({
+      id: t.id, name: String(t.name || 'Tag').slice(0, 40), color: String(t.color || 'slate').slice(0, 20),
+    })),
   };
 }
 

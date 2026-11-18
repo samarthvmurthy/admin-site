@@ -1889,3 +1889,71 @@ select.job-status-select { width: auto; }
     .inbox-item { align-items: flex-start; }
     .run-head { flex-wrap: wrap; }
 }
+
+/* =====================================================================
+   Tags (your own, on tasks, subtasks and steps)
+   ===================================================================== */
+
+.item-context { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.tag-chips { display: inline-flex; gap: 0.25rem; flex-shrink: 0; }
+.tag-chip {
+    --tag: var(--text-dim);
+    display: inline-flex; align-items: center; gap: 0.3rem;
+    font-size: 0.68rem; font-weight: 600; line-height: 1.35;
+    padding: 0.05rem 0.45rem; border-radius: 999px; white-space: nowrap;
+    color: color-mix(in srgb, var(--tag) 82%, var(--text));
+    background: color-mix(in srgb, var(--tag) 15%, transparent);
+    border: 1px solid transparent; min-height: 0;
+}
+.tag-chip::before { content: ''; width: 0.42rem; height: 0.42rem; border-radius: 50%; background: var(--tag); flex-shrink: 0; }
+button.tag-chip { cursor: pointer; }
+.tag-chip.off { background: transparent; border-color: var(--border); color: var(--text-dim); }
+.tag-chip.off::before { opacity: 0.55; }
+
+/* The button on a row: its tags, or a tag icon when it has none. */
+.tag-btn {
+    display: inline-flex; align-items: center; gap: 0.2rem; flex-wrap: nowrap;
+    background: transparent; border: 1px solid transparent; border-radius: 999px;
+    padding: 0.1rem; min-height: 0; color: var(--text-faint); max-width: 14rem; overflow: hidden;
+}
+.tag-btn:hover, .tag-btn:focus-visible { border-color: var(--border); color: var(--text-dim); }
+.tag-btn.empty { width: 1.6rem; height: 1.6rem; justify-content: center; opacity: 0; transition: opacity 0.1s ease; }
+.item-row:hover .tag-btn.empty, .tag-btn.empty:focus-visible, .tag-btn.empty[aria-expanded="true"] { opacity: 1; }
+@media (hover: none) { .tag-btn.empty { opacity: 0.6; } }
+
+.tag-picker {
+    position: fixed; z-index: 300; width: 15rem; max-width: calc(100vw - 24px);
+    background: var(--bg-alt); border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
+    box-shadow: var(--shadow-lg, 0 10px 30px rgba(0, 0, 0, 0.18)); padding: 0.4rem;
+}
+input.tag-picker-input { width: 100%; font-size: 0.82rem; padding: 0.35rem 0.5rem; margin-bottom: 0.3rem; }
+.tag-picker-list { display: flex; flex-direction: column; max-height: 16rem; overflow-y: auto; }
+.tag-option {
+    display: flex; align-items: center; gap: 0.5rem; width: 100%; text-align: left;
+    background: transparent; color: var(--text); padding: 0.35rem 0.4rem; border-radius: 6px; min-height: 0; font-size: 0.8rem;
+}
+.tag-option:hover, .tag-option:focus-visible { background: var(--surface-2); }
+.tag-option-check {
+    width: 0.95rem; height: 0.95rem; border-radius: 4px; border: 1.5px solid var(--border-strong);
+    display: inline-grid; place-items: center; flex-shrink: 0; color: var(--bg-alt);
+}
+.tag-option.on .tag-option-check { background: var(--accent); border-color: var(--accent); }
+.tag-create { color: var(--accent); }
+.tag-picker-empty { font-size: 0.76rem; color: var(--text-dim); margin: 0.3rem 0.4rem; }
+.tag-picker-manage { align-self: flex-start; font-size: 0.76rem; margin: 0.35rem 0.4rem 0.15rem; }
+
+/* Up next filter row */
+.tag-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem; margin: -0.2rem 0 0.6rem; }
+.tag-filters:empty { display: none; }
+.tag-filter-icon { color: var(--text-faint); }
+.tag-filter { display: inline-flex; align-items: center; gap: 0.35rem; }
+.tag-filter .tag-dot { width: 0.5rem; height: 0.5rem; border-radius: 50%; background: var(--tag); }
+.tag-filter.on .tag-dot { box-shadow: 0 0 0 1.5px var(--bg-alt); }
+.tag-filter-count { font-size: 0.68rem; opacity: 0.7; font-variant-numeric: tabular-nums; }
+.tag-filter-new, .tag-filter-edit { display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.76rem; }
+.tag-filter-edit { margin-left: 0.2rem; }
+
+/* Tag field in dialogs */
+.tag-editor-list { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem; }
+.tag-editor .tag-chip { font-size: 0.76rem; padding: 0.2rem 0.6rem; }
+input.tag-editor-new { width: 8rem; flex: 0 1 8rem; font-size: 0.78rem; padding: 0.25rem 0.5rem; }

@@ -334,7 +334,7 @@
             out.push({
                 key: `task:${t.id}`, kind: 'task', title: t.title, due: t.due || '', time: t.time || '',
                 priority: t.priority || 'medium', context: t.source?.calendarName ? `Task · from ${t.source.calendarName}` : 'Task',
-                href: 'pages/plan.html', refId: t.id,
+                href: 'pages/plan.html', refId: t.id, tags: t.tags || [],
             });
         });
 
@@ -347,6 +347,7 @@
                     key: `subtask:${s.id}`, kind: 'subtask', title: s.title || 'Untitled subtask', due: s.due, time: '',
                     priority: 'medium', context: `${it.title} · ${r.title}`,
                     href: `pages/plan.html#roadmap=${encodeURIComponent(r.id)}`, refId: s.id, ownerId: r.id, milestoneId: it.id,
+                    tags: s.tags || [],
                 });
             });
         });
@@ -360,6 +361,7 @@
                     due: chase ? s.followUp : s.due || '', time: chase ? '' : s.time || '',
                     priority: s.priority || 'medium', context: stepContext(projectNames[id] || ws.projectName || A.projectLabel(id), s),
                     href: `${A.projectHref(id).replace(/^\.\.\//, '')}#step=${encodeURIComponent(s.id)}`, refId: s.id, ownerId: id,
+                    tags: s.tags || [],
                 });
             });
         });
@@ -487,6 +489,33 @@
         return step;
     }
 
+    // The task, subtask or step an item was made from, and the document that
+    // saves it.
+    function source(item) {
+        if (item.kind === 'step') {
+            const ws = A.store.workspace(item.ownerId);
+            return { obj: (ws.doc?.next || []).find((s) => s.id === item.refId), doc: ws };
+        }
+        const plan = A.store.plan;
+        if (item.kind === 'task') return { obj: (plan.doc?.tasks || []).find((t) => t.id === item.refId), doc: plan };
+        let obj = null;
+        if (item.kind === 'subtask') {
+            eachMilestone(plan.doc, (r, ph, it) => { obj = obj || (it.subtasks || []).find((s) => s.id === item.refId); });
+        }
+        return { obj, doc: plan };
+    }
+
+    function setTags(item, ids) {
+        const { obj, doc } = source(item);
+        if (!obj) return false;
+        obj.tags = [...ids];
+        item.tags = [...ids];
+        doc.save(true);
+        // A new tag is created in the plan, so that needs saving too.
+        if (doc !== A.store.plan) A.store.plan.save(true);
+        return true;
+    }
+
     async function complete(item) {
         if (item.kind === 'task') {
             const plan = A.store.plan;
@@ -540,7 +569,8 @@
 
     const COMPLETABLE = new Set(['task', 'step', 'subtask']);
 
-    function row(item, { onComplete, showKind = true } = {}) {
+    // onTags(item, ids): show a tag button that edits this item's tags.
+    function row(item, { onComplete, showKind = true, onTags, onManageTags } = {}) {
         const r = A.el('div', 'item-row');
 
         if (COMPLETABLE.has(item.kind)) {
@@ -570,11 +600,19 @@
         main.href = A.pageHref(item.href);
         main.appendChild(A.el('span', 'item-title', item.title));
         const sub = A.el('span', 'item-sub');
-        sub.textContent = showKind && item.kind !== 'task' ? `${KIND_LABEL[item.kind]} · ${item.context}` : item.context;
+        const tagChips = !onTags && A.tags ? A.tags.chips(item.tags) : null;
+        if (tagChips) sub.appendChild(tagChips);
+        sub.appendChild(A.el('span', 'item-context', showKind && item.kind !== 'task' ? `${KIND_LABEL[item.kind]} · ${item.context}` : item.context));
         main.appendChild(sub);
         r.appendChild(main);
 
         const meta = A.el('div', 'item-meta');
+        if (onTags && A.tags && COMPLETABLE.has(item.kind)) {
+            meta.appendChild(A.tags.button(item.tags || [], {
+                onChange: (ids) => onTags(item, ids),
+                onManage: onManageTags,
+            }));
+        }
         if (item.priority && COMPLETABLE.has(item.kind)) meta.appendChild(A.priorityFlag(item.priority));
         const chip = item.due ? A.dueChip(item.due, item.time) : null;
         if (chip) {
@@ -585,5 +623,5 @@
         return r;
     }
 
-    A.items = { KIND_LABEL, BUCKETS, milestones, reachedMilestones, settleMilestone, settleMilestones, phasesEnding, subtaskProgress, subtaskEditor, collect, group, top, fetchEvents, complete, completeStep, reopenStep, row, review, reviewQueue, taskFromEvent, linkTask, syncAccepted };
+    A.items = { KIND_LABEL, BUCKETS, milestones, reachedMilestones, settleMilestone, settleMilestones, phasesEnding, subtaskProgress, subtaskEditor, collect, group, top, fetchEvents, complete, setTags, completeStep, reopenStep, row, review, reviewQueue, taskFromEvent, linkTask, syncAccepted };
 })();

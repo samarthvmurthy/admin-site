@@ -88,6 +88,7 @@
                 { name: 'due', label: 'Due date', type: 'date', value: task?.due || '', half: true },
                 { name: 'time', label: 'Time (optional)', type: 'time', value: task?.time || '', half: true, hint: 'Leave empty for an all-day item.' },
                 { name: 'priority', label: 'Priority', type: 'select', value: task?.priority || 'medium', options: A.PRIORITIES, half: true },
+                { name: 'tags', label: 'Tags', type: 'custom', render: () => A.tags.editor(task?.tags || []), hint: 'Click a tag to put it on or take it off. Type a name and press Enter to make a new one.' },
                 { name: 'notes', label: 'Notes', type: 'textarea', rows: 3, value: task?.notes || '' },
                 ...(task?.source ? [{
                     name: 'onCalendar', label: 'Block this time on my calendar', type: 'checkbox', value: !task.noCalendar,
@@ -100,7 +101,7 @@
             onSubmit: (v) => {
                 if (v.time && !v.due) throw new Error('Pick a date to go with that time.');
                 const target = task || { id: A.uid(), done: false, createdAt: new Date().toISOString() };
-                Object.assign(target, { title: v.title, due: v.due, time: v.time, priority: v.priority, notes: v.notes });
+                Object.assign(target, { title: v.title, due: v.due, time: v.time, priority: v.priority, notes: v.notes, tags: v.tags });
                 if (target.source) target.noCalendar = !v.onCalendar;
                 if (!editing) plan().tasks.unshift(target);
                 store.save(true);
@@ -141,7 +142,13 @@
         if (t.source?.calendarName) subBits.push(`from ${t.source.calendarName}`);
         if (t.notes) subBits.push(t.notes.split('\n')[0]);
         if (t.done && t.doneAt) subBits.push(`done ${A.relativeTime(t.doneAt)}`);
-        if (subBits.length) main.appendChild(A.el('span', 'item-sub', subBits.join(' · ')));
+        const tagChips = A.tags.chips(t.tags);
+        if (subBits.length || tagChips) {
+            const sub = A.el('span', 'item-sub');
+            if (tagChips) sub.appendChild(tagChips);
+            if (subBits.length) sub.appendChild(A.el('span', 'item-context', subBits.join(' · ')));
+            main.appendChild(sub);
+        }
         main.addEventListener('click', () => taskDialog(t));
         main.addEventListener('keydown', (e) => { if (e.key === 'Enter') taskDialog(t); });
         row.appendChild(main);
