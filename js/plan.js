@@ -44,14 +44,20 @@
 
     // --------------------------------------------------------------- tasks --
 
+    // A task sits on the day you're working on it (else its due date), and
+    // is overdue once its due date has passed.
+    const whenOf = (t, today) => A.items.taskWhen(t, today).date;
+    const isOverdue = (t, today) => Boolean((t.due && t.due < today) || (whenOf(t, today) && whenOf(t, today) < today));
+
     function taskMatches(t, view, today) {
         if (view === 'done') return t.done;
         if (t.done) return false;
+        const d = whenOf(t, today);
         switch (view) {
-            case 'today': return t.due && t.due <= today; // today + anything overdue
-            case 'upcoming': return t.due && t.due >= today && A.daysBetween(today, t.due) <= 7;
-            case 'overdue': return t.due && t.due < today;
-            case 'someday': return !t.due;
+            case 'today': return isOverdue(t, today) || d === today; // today + anything overdue
+            case 'upcoming': return Boolean(d) && d >= today && A.daysBetween(today, d) <= 7;
+            case 'overdue': return isOverdue(t, today);
+            case 'someday': return !d;
             default: return true;
         }
     }
@@ -64,45 +70,41 @@
     }
 
     function sortTasks(list) {
-        return list.sort((a, b) => {
-            if (a.due !== b.due) {
-                if (!a.due) return 1;
-                if (!b.due) return -1;
-                return a.due.localeCompare(b.due);
+        const today = A.todayKey();
+        return list.sort((x, y) => {
+            const a = A.items.taskWhen(x, today);
+            const b = A.items.taskWhen(y, today);
+            if (a.date !== b.date) {
+                if (!a.date) return 1;
+                if (!b.date) return -1;
+                return a.date.localeCompare(b.date);
             }
             if ((a.time || '') !== (b.time || '')) {
                 if (!a.time) return 1;
                 if (!b.time) return -1;
                 return a.time.localeCompare(b.time);
             }
-            return A.priorityRank(a.priority) - A.priorityRank(b.priority);
+            return A.priorityRank(x.priority) - A.priorityRank(y.priority);
         });
     }
 
+    // Calendar events, fetched once, so the dialog can show what else is on
+    // the day you pick to work on a task.
+    let eventsPromise = null;
+    const events = () => (eventsPromise ||= A.items.fetchEvents(60).then((c) => c.events || []).catch(() => []));
+
     function taskDialog(task) {
         const editing = Boolean(task);
-        A.modal.open({
+        A.schedule.taskDialog({
+            task,
             title: editing ? 'Edit task' : 'New task',
-            fields: [
-                { name: 'title', label: 'Task', required: true, value: task?.title || '', placeholder: 'What needs doing?' },
-                { name: 'due', label: 'Due date', type: 'date', value: task?.due || '', half: true },
-                { name: 'time', label: 'Time (optional)', type: 'time', value: task?.time || '', half: true, hint: 'Leave empty for an all-day item.' },
-                { name: 'priority', label: 'Priority', type: 'select', value: task?.priority || 'medium', options: A.PRIORITIES, half: true },
-                { name: 'tags', label: 'Tags', type: 'custom', render: () => A.tags.editor(task?.tags || []), hint: 'Click a tag to put it on or take it off. Type a name and press Enter to make a new one.' },
-                { name: 'notes', label: 'Notes', type: 'textarea', rows: 3, value: task?.notes || '' },
-                ...(task?.source ? [{
-                    name: 'onCalendar', label: 'Block this time on my calendar', type: 'checkbox', value: !task.noCalendar,
-                    hint: `Made from an event in ${task.source.calendarName}. Leave off if that event is already at the same time.`,
-                }] : []),
-            ],
+            description: task?.source ? `Made from an event in ${task.source.calendarName}.` : '',
             submitLabel: editing ? 'Save' : 'Add task',
-            destructiveLabel: editing ? 'Delete' : null,
-            onDestructive: () => deleteTask(task),
-            onSubmit: (v) => {
-                if (v.time && !v.due) throw new Error('Pick a date to go with that time.');
+            events: events(),
+            onDelete: editing ? () => deleteTask(task) : null,
+            onSave: (v) => {
                 const target = task || { id: A.uid(), done: false, createdAt: new Date().toISOString() };
-                Object.assign(target, { title: v.title, due: v.due, time: v.time, priority: v.priority, notes: v.notes, tags: v.tags });
-                if (target.source) target.noCalendar = !v.onCalendar;
+                Object.assign(target, v);
                 if (!editing) plan().tasks.unshift(target);
                 store.save(true);
                 render();
@@ -155,8 +157,7 @@
 
         const meta = A.el('div', 'item-meta');
         if (!t.done) meta.appendChild(A.priorityFlag(t.priority));
-        const chip = A.dueChip(t.due, t.time, t.done);
-        if (chip) meta.appendChild(chip);
+        A.items.taskChips(t, t.done).forEach((c) => meta.appendChild(c));
         if (t.calEventId) {
             const cal = A.icon('calendar', 13, 'kind-icon');
             cal.title = 'On your Google Calendar';
@@ -180,9 +181,7 @@
         due.setAttribute('aria-label', 'Due date');
         if (view === 'today') due.value = A.todayKey();
         if (view === 'upcoming') due.value = A.addDays(A.todayKey(), 1);
-        const time = A.el('input');
-        time.type = 'time';
-        time.setAttribute('aria-label', 'Time (optional)');
+        due.title = 'Due date';
         const prio = A.el('select');
         prio.setAttribute('aria-label', 'Priority');
         A.PRIORITIES.forEach((p) => {
@@ -193,15 +192,14 @@
         });
         const add = A.el('button', 'btn btn-add-primary btn-small', 'Add');
         add.type = 'submit';
-        [title, due, time, prio, add].forEach((n) => form.appendChild(n));
+        [title, due, prio, add].forEach((n) => form.appendChild(n));
 
         form.addEventListener('submit', (e) => {
             e.preventDefault();
             const text = title.value.trim();
             if (!text) { title.focus(); return; }
-            if (time.value && !due.value) { A.toast('Pick a date to go with that time', 'error'); due.focus(); return; }
             plan().tasks.unshift({
-                id: A.uid(), title: text, notes: '', due: due.value, time: time.value,
+                id: A.uid(), title: text, notes: '', due: due.value, dueTime: '', workDate: '', workTime: '',
                 priority: prio.value, done: false, createdAt: new Date().toISOString(),
             });
             store.save(true);
@@ -260,17 +258,24 @@
             return;
         }
 
-        // Group by when it's due.
+        // Group by the day you'll work on it, else when it's due.
+        const groupOf = (t) => {
+            if (isOverdue(t, today)) return 'overdue';
+            const d = whenOf(t, today);
+            if (!d) return 'someday';
+            const diff = A.daysBetween(today, d);
+            return diff === 0 ? 'today' : diff === 1 ? 'tomorrow' : diff <= 7 ? 'week' : 'later';
+        };
         const groups = [
-            { key: 'overdue', label: 'Overdue', tone: 'danger', test: (t) => t.due && t.due < today },
-            { key: 'today', label: 'Today', tone: 'accent', test: (t) => t.due === today },
-            { key: 'tomorrow', label: 'Tomorrow', test: (t) => t.due && A.daysBetween(today, t.due) === 1 },
-            { key: 'week', label: 'This week', test: (t) => t.due && A.daysBetween(today, t.due) > 1 && A.daysBetween(today, t.due) <= 7 },
-            { key: 'later', label: 'Later', test: (t) => t.due && A.daysBetween(today, t.due) > 7 },
-            { key: 'someday', label: 'No date', test: (t) => !t.due },
+            { key: 'overdue', label: 'Overdue', tone: 'danger' },
+            { key: 'today', label: 'Today', tone: 'accent' },
+            { key: 'tomorrow', label: 'Tomorrow' },
+            { key: 'week', label: 'This week' },
+            { key: 'later', label: 'Later' },
+            { key: 'someday', label: 'No date' },
         ];
         groups.forEach((g) => {
-            const items = sortTasks(list.filter(g.test));
+            const items = sortTasks(list.filter((t) => groupOf(t) === g.key));
             if (!items.length) return;
             const head = A.el('div', `group-head${g.tone ? ' tone-' + g.tone : ''}`);
             head.appendChild(A.el('span', null, g.label));

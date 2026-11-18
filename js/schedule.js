@@ -1,8 +1,10 @@
 /**
- * "Add to Up next" dialog for a calendar event: pick when you'll do it,
- * see that day's schedule with overlaps flagged, and save it as a Plan task.
+ * The task dialog, with a task's deadline kept apart from the time you set
+ * aside to work on it. Picking that time shows the day's schedule with
+ * overlaps flagged; only the set-aside time goes on your calendar.
  *
- *   Admin.schedule.open(event, { events, workspaces, onDone })
+ *   Admin.schedule.open(event, { events, workspaces, onDone })   add a calendar event as a task
+ *   Admin.schedule.taskDialog({ task, events, onSave, onDelete }) new or existing Plan task
  */
 (function () {
     const A = window.Admin;
@@ -44,11 +46,15 @@
             if (end > start) timed.push({ title: e.summary, start, end, color: e.color || 'var(--accent)', source: e.calendarName });
         });
         tasks.forEach((t) => {
-            if (t.done || t.due !== day) return;
-            if (exclude && t.source?.eventId === exclude.id) return;
-            if (!t.time) { allDay.push({ title: t.title, color: 'var(--accent)', task: true }); return; }
-            const start = toMin(t.time);
-            timed.push({ title: t.title, start, end: start + (Number(t.duration) || 30), color: 'var(--accent)', source: 'Task', task: true });
+            if (t.done) return;
+            if (exclude && (t.id === exclude.taskId || (exclude.id && t.source?.eventId === exclude.id))) return;
+            if (t.workDate === day) {
+                if (!t.workTime) { allDay.push({ title: t.title, color: 'var(--accent)', task: true }); return; }
+                const start = toMin(t.workTime);
+                timed.push({ title: t.title, start, end: start + (Number(t.duration) || 30), color: 'var(--accent)', source: 'Task', task: true });
+            } else if (!t.workDate && t.due === day) {
+                allDay.push({ title: `Due: ${t.title}`, color: 'var(--accent)', task: true });
+            }
         });
         Object.values(workspaces || {}).forEach((ws) => {
             (ws.next || []).forEach((st) => {
@@ -86,7 +92,7 @@
         status.appendChild(A.icon(!slot ? 'clock' : clashes.length ? 'alert' : 'check', 15));
         const text = A.el('div', 'conflict-text');
         if (!slot) {
-            text.textContent = 'No time set — it will be an all-day task. Pick a start time to check for overlaps.';
+            text.textContent = state.noSlotText;
         } else if (!clashes.length) {
             text.textContent = `${fmtRange(slot.start, slot.end)} is free.`;
         } else {
@@ -175,36 +181,97 @@
         if (slot) requestAnimationFrame(() => { tl.scrollTop = Math.max(0, (slot.start - startHour * 60) * PX - 60); });
     }
 
-    function open(event, { events, workspaces, onDone } = {}) {
-        const draft = A.items.taskFromEvent(event);
-        const original = { due: draft.due, time: draft.time };
-        const duration = LENGTHS.reduce((best, m) => (Math.abs(m - draft.duration) < Math.abs(best - draft.duration) ? m : best), 60);
-        let calendarTouched = false;
+    const LENGTH_DEFAULT = 60;
+    const nearestLength = (m) => LENGTHS.reduce((best, x) => (Math.abs(x - m) < Math.abs(best - m) ? x : best), LENGTH_DEFAULT);
+
+    /**
+     * taskDialog({ task, title, description, submitLabel, events, workspaces,
+     *              exclude, onSave(values), onDelete })
+     * `events` may be a promise; the day's schedule fills in when it arrives.
+     * onSave gets { title, due, dueTime, priority, tags, workDate, workTime,
+     * duration, notes }.
+     */
+    function taskDialog(spec) {
+        const t = spec.task || {};
+        const ctx = { events: Array.isArray(spec.events) ? spec.events : [], workspaces: spec.workspaces, exclude: spec.exclude || (t.id ? { taskId: t.id } : null) };
 
         A.modal.open({
-            title: 'Add to Up next',
-            description: `From ${event.calendarName || 'your calendar'}. It becomes a task you can tick off — choose when you'll do it.`,
+            title: spec.title,
+            description: spec.description,
             wide: true,
             fields: [
-                { name: 'title', label: 'Task', required: true, value: draft.title },
-                { name: 'due', label: 'Date', type: 'date', required: true, value: draft.due, half: true },
-                { name: 'time', label: 'Start (optional)', type: 'time', value: draft.time, half: true },
-                { name: 'duration', label: 'Length', type: 'select', value: String(duration), half: true, options: LENGTHS.map((m) => ({ value: String(m), label: fmtLen(m) })) },
-                { name: 'priority', label: 'Priority', type: 'select', value: 'medium', half: true, options: A.PRIORITIES },
-                { name: 'onCalendar', label: 'Block this time on my calendar', type: 'checkbox', value: false, hint: 'Adds the task to your Control Panel calendar. Turned on automatically when you move it away from the original time.' },
+                { name: 'title', label: 'Task', required: true, value: t.title || '', placeholder: 'What needs doing?' },
+                { name: 'due', label: 'Due date', type: 'date', value: t.due || '', half: true },
+                { name: 'dueTime', label: 'Due time (optional)', type: 'time', value: t.dueTime || '', half: true },
+                { name: 'priority', label: 'Priority', type: 'select', value: t.priority || 'medium', half: true, options: A.PRIORITIES },
+                { name: 'tags', label: 'Tags', type: 'custom', render: () => A.tags.editor(t.tags || []) },
+                { type: 'static', value: 'Time to work on it — optional. This is what goes on your calendar, separate from the due date.' },
+                { name: 'workDate', label: 'Day', type: 'date', value: t.workDate || '', half: true },
+                { name: 'workTime', label: 'Start', type: 'time', value: t.workTime || '', half: true },
+                { name: 'duration', label: 'Length', type: 'select', value: String(nearestLength(Number(t.duration) || LENGTH_DEFAULT)), half: true, options: LENGTHS.map((m) => ({ value: String(m), label: fmtLen(m) })) },
+                { name: 'notes', label: 'Notes', type: 'textarea', rows: 2, value: t.notes || '' },
             ],
-            submitLabel: 'Add task',
+            submitLabel: spec.submitLabel || 'Save',
+            destructiveLabel: spec.onDelete ? 'Delete' : null,
+            onDestructive: spec.onDelete,
             onSubmit: (v) => {
-                if (!v.due) throw new Error('Pick a date.');
-                const task = {
-                    ...draft,
-                    title: v.title,
-                    due: v.due,
-                    time: v.time,
-                    duration: Number(v.duration) || 60,
-                    priority: v.priority,
-                    noCalendar: !v.onCalendar,
-                };
+                if (v.dueTime && !v.due) throw new Error('Pick a due date to go with that due time.');
+                if (v.workTime && !v.workDate) throw new Error('Pick a day to go with that start time.');
+                spec.onSave({ ...v, duration: Number(v.duration) || LENGTH_DEFAULT });
+            },
+        });
+
+        const form = document.querySelector('.modal .modal-body');
+        const field = (n) => form.querySelector(`[name="${n}"]`);
+        const panel = A.el('div', 'conflict-panel');
+        field('duration').closest('.modal-field').after(panel);
+        // The static line above the work fields reads as a section heading.
+        const heading = [...form.querySelectorAll(':scope > .modal-desc')].pop();
+        heading?.classList.add('modal-section');
+
+        // The day shown: the one you're working on it, else the due date.
+        const read = () => {
+            const workDate = field('workDate').value;
+            const date = workDate || field('due').value || A.todayKey();
+            return {
+                title: field('title').value.trim(),
+                date: workDate,
+                due: date,
+                time: workDate ? field('workTime').value : '',
+                duration: Number(field('duration').value) || LENGTH_DEFAULT,
+                noSlotText: workDate
+                    ? `Set aside on ${A.dueLabel(workDate)}, no start time. Pick one to check for overlaps.`
+                    : 'No time set aside yet. Pick a day and start time, or click a free spot below.',
+            };
+        };
+        ctx.setTime = (hhmm) => {
+            if (!field('workDate').value) field('workDate').value = read().due;
+            field('workTime').value = hhmm;
+            refresh();
+        };
+        function refresh() { renderPanel(panel, read(), ctx); }
+        ['due', 'workDate', 'workTime', 'duration', 'title'].forEach((n) => {
+            field(n).addEventListener('input', refresh);
+            field(n).addEventListener('change', refresh);
+        });
+        refresh();
+        if (spec.events && typeof spec.events.then === 'function') {
+            spec.events.then((list) => { ctx.events = list || []; if (panel.isConnected) refresh(); }).catch(() => {});
+        }
+    }
+
+    // Add a calendar event as a task: its date and time become the due date,
+    // and you choose separately when you'll work on it.
+    function open(event, { events, workspaces, onDone } = {}) {
+        const draft = A.items.taskFromEvent(event);
+        taskDialog({
+            task: { ...draft, duration: LENGTH_DEFAULT },
+            title: 'Add to Up next',
+            description: `From ${event.calendarName || 'your calendar'}. Its date is the due date; set aside time to work on it if you like.`,
+            submitLabel: 'Add task',
+            events, workspaces, exclude: event,
+            onSave: (v) => {
+                const task = { ...draft, ...v };
                 A.store.plan.doc.tasks.push(task);
                 A.items.linkTask(A.store.review.doc, event, task.id);
                 A.store.plan.save(true);
@@ -213,34 +280,7 @@
                 onDone?.(task);
             },
         });
-
-        const form = document.querySelector('.modal .modal-body');
-        const field = (n) => form.querySelector(`[name="${n}"]`);
-        const panel = A.el('div', 'conflict-panel');
-        form.insertBefore(panel, form.querySelector('.modal-error'));
-
-        const read = () => ({
-            title: field('title').value.trim(),
-            due: field('due').value || original.due,
-            time: field('time').value,
-            duration: Number(field('duration').value) || 60,
-        });
-        const ctx = {
-            events, workspaces, exclude: event,
-            setTime: (hhmm) => { field('time').value = hhmm; refresh(); },
-        };
-        function refresh() {
-            const s = read();
-            if (!calendarTouched) field('onCalendar').checked = Boolean(s.time) && (s.due !== original.due || s.time !== original.time);
-            renderPanel(panel, s, ctx);
-        }
-        field('onCalendar').addEventListener('change', () => { calendarTouched = true; });
-        ['due', 'time', 'duration', 'title'].forEach((n) => {
-            field(n).addEventListener('input', refresh);
-            field(n).addEventListener('change', refresh);
-        });
-        refresh();
     }
 
-    A.schedule = { open, dayItems };
+    A.schedule = { open, taskDialog, dayItems };
 })();

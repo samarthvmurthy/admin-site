@@ -108,12 +108,49 @@
 
     const pad2 = (n) => String(n).padStart(2, '0');
 
+    // ------------------------------------------------------- task timing --
+    //
+    // A task's deadline (due, dueTime) is separate from the time you set
+    // aside for it (workDate, workTime, duration), which is what goes on the
+    // calendar. It's listed on the day you'll work on it; once that day has
+    // passed without it being done, it goes back to its due date.
+    function taskWhen(t, today = A.todayKey()) {
+        if (t.workDate && (t.workDate >= today || !t.due)) return { date: t.workDate, time: t.workTime || '', scheduled: true };
+        return { date: t.due || '', time: t.dueTime || '', scheduled: false };
+    }
+
+    function deadlineChip(t, done) {
+        if (!t.due) return null;
+        const chip = A.dueChip(t.due, t.dueTime, done);
+        chip.classList.add('deadline-chip');
+        chip.textContent = `Due ${chip.textContent}`;
+        chip.title = `Due ${chip.title}${t.dueTime ? ` at ${A.formatTime(t.dueTime)}` : ''}`;
+        return chip;
+    }
+
+    function workChip(t, done) {
+        if (!t.workDate) return null;
+        const chip = A.dueChip(t.workDate, t.workTime, done);
+        chip.classList.add('work-chip');
+        chip.prepend(A.icon('clock', 11));
+        const len = Number(t.duration) || 0;
+        chip.title = `Time set aside: ${chip.title}${t.workTime ? ` at ${A.formatTime(t.workTime)}${len ? ` for ${len < 60 ? `${len} min` : `${len / 60} h`}` : ''}` : ''}`;
+        return chip;
+    }
+
+    // The chips for a task's row: when you'll do it, then when it's due.
+    function taskChips(t, done) {
+        return [workChip(t, done), deadlineChip(t, done)].filter(Boolean);
+    }
+
     // A tickable Plan task for a calendar event. `overrides` carries what you
     // chose in the scheduling dialog; without it the event's own time is used.
     function taskFromEvent(e, overrides = {}) {
         const start = A.parseDate(e.start);
         const end = e.end ? A.parseDate(e.end) : null;
         const minutes = !e.allDay && end ? Math.max(15, Math.round((end - start) / 60000)) : 60;
+        // The event's own date and time are the deadline. Time to work on it
+        // is yours to choose, and starts unset.
         const today = A.todayKey();
         let due = A.dateKey(start);
         if (e.allDay && due < today) due = today; // multi-day event already under way
@@ -122,13 +159,15 @@
             title: e.summary,
             notes: e.location ? `Location: ${e.location}` : '',
             due,
-            time: e.allDay ? '' : `${pad2(start.getHours())}:${pad2(start.getMinutes())}`,
+            dueTime: e.allDay ? '' : `${pad2(start.getHours())}:${pad2(start.getMinutes())}`,
+            workDate: '',
+            workTime: '',
             duration: minutes,
             priority: 'medium',
             done: false,
             createdAt: new Date().toISOString(),
             source: { calendarId: e.calendarId, eventId: e.id, calendarName: e.calendarName || 'Calendar' },
-            // Same time as the original event: it's already on your calendar.
+            // The deadline is the event itself, already on your calendar.
             noCalendar: true,
             ...overrides,
         };
@@ -329,10 +368,14 @@
     function collect({ plan, workspaces, projectNames = {} }) {
         const out = [];
 
+        const today = A.todayKey();
         (plan?.tasks || []).forEach((t) => {
             if (t.done) return;
+            const when = taskWhen(t, today);
             out.push({
-                key: `task:${t.id}`, kind: 'task', title: t.title, due: t.due || '', time: t.time || '',
+                key: `task:${t.id}`, kind: 'task', title: t.title, due: when.date, time: when.time, task: t,
+                // Past its deadline counts as overdue, whenever it's scheduled.
+                late: Boolean(t.due && t.due < today),
                 priority: t.priority || 'medium', context: t.source?.calendarName ? `Task · from ${t.source.calendarName}` : 'Task',
                 href: 'pages/plan.html', refId: t.id, tags: t.tags || [],
             });
@@ -399,6 +442,7 @@
     ];
 
     function bucketOf(item, today) {
+        if (item.late) return 'overdue';
         if (!item.due) return 'someday';
         const diff = A.daysBetween(today, item.due);
         if (diff < 0) return 'overdue';
@@ -428,7 +472,7 @@
     // Overdue work is ranked by priority first: the oldest low-priority chore
     // shouldn't bury something important that slipped yesterday.
     function compareOverdue(a, b) {
-        return A.priorityRank(a.priority) - A.priorityRank(b.priority) || a.due.localeCompare(b.due);
+        return A.priorityRank(a.priority) - A.priorityRank(b.priority) || (a.due || '').localeCompare(b.due || '');
     }
 
     function group(items) {
@@ -614,7 +658,8 @@
             }));
         }
         if (item.priority && COMPLETABLE.has(item.kind)) meta.appendChild(A.priorityFlag(item.priority));
-        const chip = item.due ? A.dueChip(item.due, item.time) : null;
+        const chip = item.task ? null : item.due ? A.dueChip(item.due, item.time) : null;
+        if (item.task) taskChips(item.task).forEach((c) => meta.appendChild(c));
         if (chip) {
             if (item.kind === 'event' && !item.time) chip.textContent = `${A.dueLabel(item.due)} · all day`;
             meta.appendChild(chip);
@@ -623,5 +668,5 @@
         return r;
     }
 
-    A.items = { KIND_LABEL, BUCKETS, milestones, reachedMilestones, settleMilestone, settleMilestones, phasesEnding, subtaskProgress, subtaskEditor, collect, group, top, fetchEvents, complete, setTags, completeStep, reopenStep, row, review, reviewQueue, taskFromEvent, linkTask, syncAccepted };
+    A.items = { KIND_LABEL, BUCKETS, milestones, reachedMilestones, settleMilestone, settleMilestones, phasesEnding, subtaskProgress, subtaskEditor, collect, group, top, fetchEvents, complete, setTags, taskWhen, taskChips, completeStep, reopenStep, row, review, reviewQueue, taskFromEvent, linkTask, syncAccepted };
 })();

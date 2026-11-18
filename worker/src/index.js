@@ -276,9 +276,26 @@ function emptyPlan() {
   return { tasks: [], roadmaps: [], stepTemplates: [], weekCapacity: 12, tags: [], timeZone: '', calOrphans: [], updatedAt: null };
 }
 
+// A task has two separate times:
+//   due, dueTime                  the deadline (dueTime optional)
+//   workDate, workTime, duration  time you set aside to do it, put on the calendar
+// Tasks saved before that split had a single due + time. A task made from a
+// calendar event at its own time kept that time as its deadline; any other
+// timed task was time blocked out on the calendar.
+function upgradeTask(t) {
+  if (!t || typeof t !== 'object' || !('time' in t)) return t;
+  const { time, ...rest } = t;
+  const out = { ...rest, dueTime: '', workDate: '', workTime: '' };
+  if (isTime(time) && isDateKey(t.due)) {
+    if (t.source && t.noCalendar) out.dueTime = time;
+    else { out.workDate = t.due; out.workTime = time; }
+  }
+  return out;
+}
+
 function normalizePlan(body) {
   return {
-    tasks: arr(body.tasks).filter(withId),
+    tasks: arr(body.tasks).filter(withId).map(upgradeTask),
     roadmaps: arr(body.roadmaps).filter(withId).map((r) => ({
       ...r,
       phases: arr(r.phases).filter(withId).map((p) => ({ ...p, items: arr(p.items).filter(withId).map(settleMilestone) })),
@@ -353,7 +370,7 @@ async function handleGetPlan(env) {
     doc = seedPlan();
     await writeJson(env, PLAN_KEY, doc);
   }
-  return json({ ...emptyPlan(), ...doc });
+  return json({ ...emptyPlan(), ...doc, tasks: arr(doc.tasks).map(upgradeTask) });
 }
 
 async function handlePutPlan(env, request) {
@@ -755,21 +772,38 @@ function cpProps(kind, id, owner) {
   return { private: { cp: '1', cpKind: kind, cpId: id, cpOwner: owner || '' } };
 }
 
-function taskSpec(t, timeZone) {
-  // Tasks made from a calendar event at its own time are already on the
-  // calendar; mirroring them would show the event twice.
+function taskSpec(task, timeZone) {
+  const t = upgradeTask(task);
+  const dueText = isDateKey(t.due) ? `Due ${t.due}${isTime(t.dueTime) ? ` at ${t.dueTime}` : ''}` : '';
+  const base = {
+    summary: `${t.done ? '✓' : '○'} ${t.title || 'Untitled task'}`,
+    extendedProperties: cpProps('task', t.id, 'plan'),
+  };
+  const description = (extra) => [
+    extra,
+    t.priority ? `Priority: ${t.priority}` : '',
+    t.notes || '',
+    `Open in Plan: ${SITE_URL}/pages/plan.html`,
+  ].filter(Boolean).join('\n\n');
+
+  // Time you've set aside to work on it: a busy block on the calendar.
+  if (isDateKey(t.workDate)) {
+    return {
+      ...base,
+      description: description(dueText),
+      ...eventWhen(t.workDate, t.workTime, clampMinutes(t.duration), timeZone),
+      transparency: 'opaque',
+    };
+  }
+  // Otherwise just the deadline, as an all-day marker. A task made from a
+  // calendar event is already there as that event, so it isn't repeated.
   if (!isDateKey(t.due) || t.noCalendar) return null;
   return {
-    summary: `${t.done ? '✓' : '○'} ${t.title || 'Untitled task'}`,
-    description: [
-      t.priority ? `Priority: ${t.priority}` : '',
-      t.notes || '',
-      `Open in Plan: ${SITE_URL}/pages/plan.html`,
-    ].filter(Boolean).join('\n\n'),
-    ...eventWhen(t.due, t.time, clampMinutes(t.duration), timeZone),
-    // A task you scheduled from an event is real time you've set aside.
-    transparency: t.source ? 'opaque' : 'transparent',
-    extendedProperties: cpProps('task', t.id, 'plan'),
+    ...base,
+    summary: `${base.summary}${isTime(t.dueTime) ? ` (due ${t.dueTime})` : ''}`,
+    description: description(dueText),
+    ...eventWhen(t.due, '', 0, timeZone),
+    transparency: 'transparent',
   };
 }
 

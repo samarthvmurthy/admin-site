@@ -151,8 +151,10 @@
 
         const today = A.todayKey();
         const open = state.plan.tasks.filter((t) => !t.done);
-        const dueToday = open.filter((t) => t.due === today).length;
-        const overdue = open.filter((t) => t.due && t.due < today).length;
+        const when = (t) => A.items.taskWhen(t, today).date;
+        const late = (t) => (t.due && t.due < today) || (when(t) && when(t) < today);
+        const dueToday = open.filter((t) => !late(t) && when(t) === today).length;
+        const overdue = open.filter(late).length;
 
         const stats = A.el('div', 'stat-row');
         stats.appendChild(stat(dueToday, 'Due today', dueToday ? 'accent' : '', 'pages/plan.html#view=today'));
@@ -176,7 +178,7 @@
             const title = input.value.trim();
             if (!title) return;
             state.plan.tasks.unshift({
-                id: A.uid(), title, notes: '', due: due.value || '', time: '', priority: 'medium',
+                id: A.uid(), title, notes: '', due: due.value || '', dueTime: '', workDate: '', workTime: '', priority: 'medium',
                 done: false, createdAt: new Date().toISOString(),
             });
             A.store.plan.save(true);
