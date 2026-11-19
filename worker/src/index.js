@@ -293,9 +293,46 @@ function upgradeTask(t) {
   return out;
 }
 
+// A task can be part of a bigger one (parentId). Links to a missing task or
+// that loop back on themselves are dropped, and a task with smaller tasks is
+// done exactly when they all are, so its calendar tick always agrees.
+function settleTaskFamilies(tasks) {
+  const byId = new Map(tasks.map((t) => [t.id, t]));
+  const out = tasks.map((t) => {
+    const pid = typeof t.parentId === 'string' ? t.parentId : '';
+    return pid && pid !== t.id && byId.has(pid) ? { ...t, parentId: pid } : { ...t, parentId: '' };
+  });
+  const byIdOut = new Map(out.map((t) => [t.id, t]));
+  out.forEach((t) => {
+    const seen = new Set([t.id]);
+    for (let p = byIdOut.get(t.parentId); p; p = byIdOut.get(p.parentId)) {
+      if (seen.has(p.id)) { t.parentId = ''; break; }
+      seen.add(p.id);
+    }
+  });
+  const kids = new Map();
+  out.forEach((t) => { if (t.parentId) kids.set(t.parentId, [...(kids.get(t.parentId) || []), t]); });
+  const settled = new Set();
+  const settle = (t) => {
+    if (settled.has(t.id)) return t.done;
+    settled.add(t.id);
+    const list = kids.get(t.id);
+    if (!list) return t.done;
+    const done = list.map(settle).every(Boolean);
+    if (Boolean(t.done) !== done) {
+      t.done = done;
+      if (done) t.doneAt = t.doneAt || nowIso();
+      else delete t.doneAt;
+    }
+    return t.done;
+  };
+  out.forEach(settle);
+  return out;
+}
+
 function normalizePlan(body) {
   return {
-    tasks: arr(body.tasks).filter(withId).map(upgradeTask),
+    tasks: settleTaskFamilies(arr(body.tasks).filter(withId).map(upgradeTask)),
     roadmaps: arr(body.roadmaps).filter(withId).map((r) => ({
       ...r,
       phases: arr(r.phases).filter(withId).map((p) => ({ ...p, items: arr(p.items).filter(withId).map(settleMilestone) })),

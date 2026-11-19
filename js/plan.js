@@ -32,6 +32,7 @@
     function route() {
         const h = A.hashParams();
         if (h.has('roadmap')) return { kind: 'roadmap', id: h.get('roadmap') };
+        if (h.has('task')) return { kind: 'task', id: h.get('task') };
         if (window.location.hash === '#roadmaps') return { kind: 'roadmaps' };
         const view = h.get('view');
         return { kind: 'tasks', view: VIEWS.some((v) => v.key === view) ? view : 'all' };
@@ -93,10 +94,15 @@
     let eventsPromise = null;
     const events = () => (eventsPromise ||= A.items.fetchEvents(60).then((c) => c.events || []).catch(() => []));
 
-    function taskDialog(task) {
+    // Toast each bigger task that a change finished.
+    const announce = (parents) => parents.filter((p) => p.done).forEach((p) => A.toast(`All parts done: ${p.title}`, 'ok'));
+
+    // `defaults` prefills a new task (a smaller task gets its parentId).
+    function taskDialog(task, defaults = {}) {
         const editing = Boolean(task);
+        const oldParent = task?.parentId || '';
         A.schedule.taskDialog({
-            task,
+            task: task || defaults,
             title: editing ? 'Edit task' : 'New task',
             description: task?.source ? `Made from an event in ${task.source.calendarName}.` : '',
             submitLabel: editing ? 'Save' : 'Add task',
@@ -106,6 +112,11 @@
                 const target = task || { id: A.uid(), done: false, createdAt: new Date().toISOString() };
                 Object.assign(target, v);
                 if (!editing) plan().tasks.unshift(target);
+                // Its old and new bigger tasks may finish or reopen.
+                const tasks = plan().tasks;
+                const changed = A.items.settleParents(tasks, target);
+                if (oldParent && oldParent !== target.parentId) changed.push(...A.items.settleParents(tasks, { parentId: oldParent }));
+                announce(changed);
                 store.save(true);
                 render();
             },
@@ -113,22 +124,71 @@
     }
 
     function deleteTask(task) {
-        plan().tasks = plan().tasks.filter((t) => t.id !== task.id);
+        const kids = A.items.childrenOf(plan().tasks, task.id).length;
+        announce(A.items.removeTask(plan(), task));
         store.save(true);
-        render();
-        A.toast('Task deleted');
+        if (route().kind === 'task' && route().id === task.id) go(task.parentId ? `#task=${encodeURIComponent(task.parentId)}` : '#view=all');
+        else render();
+        A.toast(kids ? `Task deleted · its ${kids} smaller task${kids === 1 ? '' : 's'} stay${kids === 1 ? 's' : ''}` : 'Task deleted');
     }
 
-    function toggleTask(task, done) {
-        task.done = done;
-        if (done) task.doneAt = new Date().toISOString();
-        else delete task.doneAt;
+    // Returns false if the tick didn't go ahead.
+    async function toggleTask(task, done) {
+        const tasks = plan().tasks;
+        if (done) {
+            const open = A.items.descendantsOf(tasks, task.id).filter((d) => !d.done).length;
+            if (open && !(await A.confirm({
+                title: `Finish "${task.title}"?`,
+                description: `${open} smaller task${open === 1 ? ' is' : 's are'} still open and will be ticked off with it.`,
+                confirmLabel: 'Finish all',
+            }))) { render(); return; }
+            announce(A.items.finishTask(tasks, task).parents);
+        } else {
+            // A bigger task follows its smaller ones, so reopen one of those.
+            if (A.items.childrenOf(tasks, task.id).length) {
+                A.toast('Reopen one of its smaller tasks to reopen this one');
+                render();
+                return;
+            }
+            A.items.reopenTask(tasks, task);
+        }
         store.save(true);
         // Let the tick register before the row leaves the list.
         setTimeout(render, done ? 280 : 0);
     }
 
-    function taskRow(t) {
+    // "↳ Bigger task": opens that task's own view.
+    function parentLink(parent) {
+        const a = A.el('a', 'parent-link');
+        a.href = `#task=${encodeURIComponent(parent.id)}`;
+        a.title = `Part of "${parent.title}"`;
+        a.appendChild(A.icon('corner', 11));
+        a.appendChild(A.el('span', null, parent.title || 'Untitled task'));
+        a.addEventListener('click', (e) => e.stopPropagation());
+        return a;
+    }
+
+    // "2/5" with a little bar, for a task that has smaller tasks.
+    function progressChip(t) {
+        const { done, total } = A.items.taskProgress(plan().tasks, t);
+        if (!total) return null;
+        const a = A.el('a', `family-chip${done === total ? ' complete' : ''}`);
+        a.href = `#task=${encodeURIComponent(t.id)}`;
+        a.title = `${done} of ${total} smaller task${total === 1 ? '' : 's'} done — open`;
+        const bar = A.el('span', 'family-bar');
+        const fill = A.el('span', 'family-fill');
+        fill.style.width = `${(done / total) * 100}%`;
+        bar.appendChild(fill);
+        a.appendChild(bar);
+        a.appendChild(A.el('span', null, `${done}/${total}`));
+        return a;
+    }
+
+    function addSmaller(parent) {
+        taskDialog(null, { parentId: parent.id, priority: parent.priority, tags: [...(parent.tags || [])] });
+    }
+
+    function taskRow(t, opts = {}) {
         const row = A.el('div', `item-row${t.done ? ' is-done' : ''}`);
         row.appendChild(A.checkbox(t.done, (v) => {
             row.classList.toggle('is-done', v);
@@ -145,8 +205,10 @@
         if (t.notes) subBits.push(t.notes.split('\n')[0]);
         if (t.done && t.doneAt) subBits.push(`done ${A.relativeTime(t.doneAt)}`);
         const tagChips = A.tags.chips(t.tags);
-        if (subBits.length || tagChips) {
+        const parent = opts.showParent === false ? null : A.items.parentOf(plan().tasks, t);
+        if (subBits.length || tagChips || parent) {
             const sub = A.el('span', 'item-sub');
+            if (parent) sub.appendChild(parentLink(parent));
             if (tagChips) sub.appendChild(tagChips);
             if (subBits.length) sub.appendChild(A.el('span', 'item-context', subBits.join(' · ')));
             main.appendChild(sub);
@@ -157,6 +219,8 @@
 
         const meta = A.el('div', 'item-meta');
         if (!t.done) meta.appendChild(A.priorityFlag(t.priority));
+        const fam = progressChip(t);
+        if (fam) meta.appendChild(fam);
         A.items.taskChips(t, t.done).forEach((c) => meta.appendChild(c));
         if (t.calEventId) {
             const cal = A.icon('calendar', 13, 'kind-icon');
@@ -164,17 +228,18 @@
             meta.appendChild(cal);
         }
         const actions = A.el('div', 'item-actions');
+        if (!t.done) actions.appendChild(A.iconButton('plus', 'Add a smaller task', () => addSmaller(t), 'icon-btn sm'));
         actions.appendChild(A.iconButton('trash', 'Delete task', () => deleteTask(t), 'icon-btn sm danger'));
         meta.appendChild(actions);
         row.appendChild(meta);
         return row;
     }
 
-    function quickAdd(view) {
+    function quickAdd(view, parent) {
         const form = A.el('form', 'quick-add');
         const title = A.el('input', 'qa-title');
         title.type = 'text';
-        title.placeholder = 'Add a task and press Enter…';
+        title.placeholder = parent ? 'Add a smaller task and press Enter…' : 'Add a task and press Enter…';
         title.setAttribute('aria-label', 'Task');
         const due = A.el('input');
         due.type = 'date';
@@ -187,7 +252,7 @@
         A.PRIORITIES.forEach((p) => {
             const o = A.el('option', null, `${p.label} priority`);
             o.value = p.value;
-            if (p.value === 'medium') o.selected = true;
+            if (p.value === (parent?.priority || 'medium')) o.selected = true;
             prio.appendChild(o);
         });
         const add = A.el('button', 'btn btn-add-primary btn-small', 'Add');
@@ -198,10 +263,13 @@
             e.preventDefault();
             const text = title.value.trim();
             if (!text) { title.focus(); return; }
-            plan().tasks.unshift({
+            const task = {
                 id: A.uid(), title: text, notes: '', due: due.value, dueTime: '', workDate: '', workTime: '',
                 priority: prio.value, done: false, createdAt: new Date().toISOString(),
-            });
+            };
+            if (parent) Object.assign(task, { parentId: parent.id, tags: [...(parent.tags || [])] });
+            plan().tasks.unshift(task);
+            if (parent) A.items.settleParents(plan().tasks, task); // a new open part reopens it
             store.save(true);
             render();
             main.querySelector('.qa-title')?.focus();
@@ -285,6 +353,73 @@
             items.forEach((t) => rows.appendChild(taskRow(t)));
             panel.appendChild(rows);
         });
+        main.appendChild(panel);
+    }
+
+    // A bigger task and the smaller tasks that add up to it.
+    function renderTaskFocus(id) {
+        const tasks = plan().tasks;
+        const t = tasks.find((x) => x.id === id);
+        A.clear(main);
+        if (!t) {
+            setTitle('Task not found', 'It may have been deleted.');
+            main.appendChild(A.el('div', 'empty-state', 'This task no longer exists.'));
+            return;
+        }
+        const { done, total } = A.items.taskProgress(tasks, t);
+        setTitle(t.title || 'Untitled task', total
+            ? `${done} of ${total} smaller task${total === 1 ? '' : 's'} done. It's finished when they all are.`
+            : 'Break it into smaller tasks. It finishes when they all do.');
+
+        // Breadcrumb up to the top-level task.
+        const trail = [];
+        for (let p = A.items.parentOf(tasks, t); p && !trail.includes(p); p = A.items.parentOf(tasks, p)) trail.unshift(p);
+        const crumbs = A.el('nav', 'task-crumbs');
+        const back = A.el('a', null, 'All tasks');
+        back.href = '#view=all';
+        crumbs.appendChild(back);
+        trail.forEach((p) => {
+            crumbs.appendChild(A.el('span', 'sep', '/'));
+            const a = A.el('a', null, p.title || 'Untitled task');
+            a.href = `#task=${encodeURIComponent(p.id)}`;
+            crumbs.appendChild(a);
+        });
+        main.appendChild(crumbs);
+
+        const top = A.el('section', 'panel');
+        const rows = A.el('div', 'row-list');
+        rows.appendChild(taskRow(t, { showParent: false }));
+        top.appendChild(rows);
+        if (total) {
+            const bar = A.el('div', 'task-focus-progress');
+            bar.appendChild(A.progressBar(done, total, true));
+            top.appendChild(bar);
+        }
+        main.appendChild(top);
+
+        if (!t.done) main.appendChild(quickAdd('all', t));
+
+        const kids = A.items.childrenOf(tasks, t.id);
+        const panel = A.el('section', 'panel');
+        if (!kids.length) {
+            const empty = A.el('div', 'empty-state');
+            empty.appendChild(A.el('strong', null, 'No smaller tasks yet'));
+            empty.appendChild(document.createTextNode('Add the steps that get this done above, or link an existing task to it with "Part of" in its dialog.'));
+            panel.appendChild(empty);
+        } else {
+            const open = sortTasks(kids.filter((k) => !k.done));
+            const finished = kids.filter((k) => k.done).sort((a, b) => new Date(b.doneAt || 0) - new Date(a.doneAt || 0));
+            [{ label: 'To do', items: open }, { label: 'Done', items: finished }].forEach((g) => {
+                if (!g.items.length) return;
+                const head = A.el('div', 'group-head');
+                head.appendChild(A.el('span', null, g.label));
+                head.appendChild(A.el('span', 'count', String(g.items.length)));
+                panel.appendChild(head);
+                const list = A.el('div', 'row-list');
+                g.items.forEach((k) => list.appendChild(taskRow(k, { showParent: false })));
+                panel.appendChild(list);
+            });
+        }
         main.appendChild(panel);
     }
 
@@ -788,6 +923,23 @@
         document.title = `${title} — Plan`;
     }
 
+    // Open tasks that have smaller tasks, so each has a home in the sidebar.
+    function biggerTasksSection(r) {
+        const tasks = plan().tasks;
+        const parents = tasks.filter((t) => !t.done && A.items.childrenOf(tasks, t.id).length);
+        if (!parents.length) return [];
+        return [{
+            label: 'Bigger tasks',
+            items: parents.map((t) => {
+                const p = A.items.taskProgress(tasks, t);
+                return {
+                    label: t.title || 'Untitled task', icon: 'layers', href: `#task=${encodeURIComponent(t.id)}`,
+                    active: r.kind === 'task' && r.id === t.id, count: `${p.done}/${p.total}`,
+                };
+            }),
+        }];
+    }
+
     function renderSidebar() {
         const r = route();
         const c = counts();
@@ -803,6 +955,7 @@
                     countTone: v.key === 'overdue' && c.overdue ? 'danger' : v.key === 'today' && c.today ? 'accent' : '',
                 })),
             },
+            ...biggerTasksSection(r),
             {
                 label: 'Roadmaps',
                 action: { label: 'New roadmap', onClick: newRoadmapDialog },
@@ -826,8 +979,9 @@
     function render() {
         if (!plan()) return;
         const r = route();
-        main.className = r.kind === 'tasks' ? 'narrow' : '';
+        main.className = r.kind === 'tasks' || r.kind === 'task' ? 'narrow' : '';
         if (r.kind === 'roadmap') renderRoadmap(r.id);
+        else if (r.kind === 'task') renderTaskFocus(r.id);
         else if (r.kind === 'roadmaps') renderRoadmaps();
         else renderTasks(r.view);
         renderSidebar();
@@ -840,7 +994,7 @@
     async function load() {
         try {
             await store.load();
-            if (A.items.settleMilestones(store.doc)) store.save(true);
+            if (A.items.settleMilestones(store.doc) | A.items.settleAllParents(store.doc.tasks)) store.save(true);
         } catch (e) {
             A.clear(main).appendChild(A.el('div', 'empty-state', `Couldn't load your plan: ${e.message}`));
             return;

@@ -587,7 +587,7 @@
             loadEvents(),
         ]);
         state.plan = plan;
-        if (A.items.settleMilestones(plan)) A.store.plan.save(true);
+        if (A.items.settleMilestones(plan) | A.items.settleAllParents(plan.tasks)) A.store.plan.save(true);
         Object.entries(workspaces).forEach(([id, ws]) => { state.workspaces[id] = A.store.workspace(id).seed(ws); });
         custom.forEach((p) => { state.names[p.id] = p.name; });
         renderCalendarNote();

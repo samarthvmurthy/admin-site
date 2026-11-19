@@ -1969,3 +1969,33 @@ input.tag-editor-new { width: 8rem; flex: 0 1 8rem; font-size: 0.78rem; padding:
 .due-chip.work-chip { display: inline-flex; align-items: center; gap: 0.25rem; }
 .due-chip.work-chip .inline-icon { display: inline-grid; }
 .due-chip.deadline-chip { background: transparent; box-shadow: inset 0 0 0 1px color-mix(in srgb, currentColor 40%, transparent); }
+
+/* =====================================================================
+   Bigger tasks and their smaller tasks (Plan)
+   ===================================================================== */
+
+.parent-link {
+    display: inline-flex; align-items: center; gap: 0.2rem; min-width: 0; max-width: 16rem;
+    color: var(--text-dim); text-decoration: none; font-weight: 600; flex-shrink: 1;
+}
+.parent-link span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.parent-link svg { flex-shrink: 0; color: var(--text-faint); }
+.parent-link:hover { color: var(--accent); }
+.family-chip {
+    display: inline-flex; align-items: center; gap: 0.35rem;
+    font-size: 0.72rem; font-weight: 600; color: var(--text-dim); text-decoration: none;
+    padding: 0.12rem 0.45rem; border-radius: 999px; background: var(--surface-2);
+    font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.family-chip:hover { color: var(--text); }
+.family-bar { width: 1.8rem; height: 0.28rem; border-radius: 999px; background: var(--border); overflow: hidden; }
+.family-fill { display: block; height: 100%; background: var(--accent); border-radius: inherit; }
+.family-chip.complete .family-fill { background: var(--ok); }
+.task-crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem; font-size: 0.8rem; margin-bottom: 0.75rem; min-width: 0; }
+.task-crumbs a { color: var(--text-dim); text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 14rem; }
+.task-crumbs a:hover { color: var(--accent); }
+.task-crumbs .sep { color: var(--text-faint); }
+.task-focus-progress { padding: 0.25rem 1rem 0.85rem; }
+@media (max-width: 640px) {
+    .parent-link { max-width: 9rem; }
+}

@@ -181,6 +181,19 @@
         if (slot) requestAnimationFrame(() => { tl.scrollTop = Math.max(0, (slot.start - startHour * 60) * PX - 60); });
     }
 
+    // "Part of": the bigger task this one counts towards, if any.
+    function partOfField(t) {
+        const tasks = A.store.plan.doc?.tasks || [];
+        const choices = A.items.parentChoices(tasks, t);
+        if (!choices.length && !t.parentId) return [];
+        const label = (x) => `${x.title || 'Untitled task'}${x.due ? ` · due ${A.dueLabel(x.due)}` : ''}${x.done ? ' · done' : ''}`;
+        return [{
+            name: 'parentId', label: 'Part of', type: 'select', value: t.parentId || '',
+            hint: 'Pick a bigger task this one counts towards. It finishes when all its smaller tasks do.',
+            options: [{ value: '', label: 'Nothing — a task on its own' }, ...choices.map((x) => ({ value: x.id, label: label(x) }))],
+        }];
+    }
+
     const LENGTH_DEFAULT = 60;
     const nearestLength = (m) => LENGTHS.reduce((best, x) => (Math.abs(x - m) < Math.abs(best - m) ? x : best), LENGTH_DEFAULT);
 
@@ -188,8 +201,8 @@
      * taskDialog({ task, title, description, submitLabel, events, workspaces,
      *              exclude, onSave(values), onDelete })
      * `events` may be a promise; the day's schedule fills in when it arrives.
-     * onSave gets { title, due, dueTime, priority, tags, workDate, workTime,
-     * duration, notes }.
+     * onSave gets { title, parentId, due, dueTime, priority, tags, workDate,
+     * workTime, duration, notes }.
      */
     function taskDialog(spec) {
         const t = spec.task || {};
@@ -201,6 +214,7 @@
             wide: true,
             fields: [
                 { name: 'title', label: 'Task', required: true, value: t.title || '', placeholder: 'What needs doing?' },
+                ...partOfField(t),
                 { name: 'due', label: 'Due date', type: 'date', value: t.due || '', half: true },
                 { name: 'dueTime', label: 'Due time (optional)', type: 'time', value: t.dueTime || '', half: true },
                 { name: 'priority', label: 'Priority', type: 'select', value: t.priority || 'medium', half: true, options: A.PRIORITIES },
@@ -273,6 +287,7 @@
             onSave: (v) => {
                 const task = { ...draft, ...v };
                 A.store.plan.doc.tasks.push(task);
+                A.items.settleParents(A.store.plan.doc.tasks, task); // an open part reopens its bigger task
                 A.items.linkTask(A.store.review.doc, event, task.id);
                 A.store.plan.save(true);
                 A.store.review.save(true);

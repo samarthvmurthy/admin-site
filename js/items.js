@@ -143,6 +143,100 @@
         return [workChip(t, done), deadlineChip(t, done)].filter(Boolean);
     }
 
+    // ------------------------------------------------------- task family --
+    //
+    // A task can be part of a bigger one (`parentId`). A parent with smaller
+    // tasks is finished exactly when all of them are: ticking the last one
+    // ticks the parent, and reopening one reopens it.
+
+    const childrenOf = (tasks, id) => (tasks || []).filter((t) => t.parentId === id);
+    const parentOf = (tasks, t) => (t?.parentId ? (tasks || []).find((x) => x.id === t.parentId) || null : null);
+
+    function taskProgress(tasks, t) {
+        const kids = childrenOf(tasks, t.id);
+        return { done: kids.filter((k) => k.done).length, total: kids.length };
+    }
+
+    // Every task under `id`, at any depth.
+    function descendantsOf(tasks, id) {
+        const out = [];
+        const walk = (pid) => childrenOf(tasks, pid).forEach((k) => { if (!out.includes(k)) { out.push(k); walk(k.id); } });
+        walk(id);
+        return out;
+    }
+
+    // Tasks `t` could be put under: open ones that aren't itself or below it.
+    function parentChoices(tasks, t) {
+        const below = new Set(t?.id ? [t.id, ...descendantsOf(tasks, t.id).map((d) => d.id)] : []);
+        return (tasks || []).filter((x) => !below.has(x.id) && (!x.done || x.id === t?.parentId));
+    }
+
+    function markDone(t, done) {
+        t.done = done;
+        if (done) t.doneAt = t.doneAt || new Date().toISOString();
+        else delete t.doneAt;
+    }
+
+    // Bring the parents above `t` in line with their smaller tasks. Returns
+    // the parents that changed, nearest first.
+    function settleParents(tasks, t) {
+        const changed = [];
+        const seen = new Set();
+        for (let p = parentOf(tasks, t); p && !seen.has(p.id); p = parentOf(tasks, p)) {
+            seen.add(p.id);
+            const { done, total } = taskProgress(tasks, p);
+            if (!total || Boolean(p.done) === (done === total)) break;
+            markDone(p, done === total);
+            changed.push(p);
+        }
+        return changed;
+    }
+
+    // Settle every parent at once, deepest first (after loading, say).
+    function settleAllParents(tasks) {
+        let changed = false;
+        const depth = (t, n = 0, seen = new Set()) => (t.parentId && !seen.has(t.id) ? depth(parentOf(tasks, t) || {}, n + 1, seen.add(t.id)) : n);
+        [...(tasks || [])].filter((t) => childrenOf(tasks, t.id).length)
+            .sort((a, b) => depth(b) - depth(a))
+            .forEach((p) => {
+                const { done, total } = taskProgress(tasks, p);
+                if (Boolean(p.done) !== (done === total)) { markDone(p, done === total); changed = true; }
+            });
+        return changed;
+    }
+
+    // Tick a task (and everything under it). Returns { finished, parents }:
+    // how many smaller tasks were ticked with it, and parents that finished.
+    function finishTask(tasks, t) {
+        const open = descendantsOf(tasks, t.id).filter((d) => !d.done);
+        open.forEach((d) => markDone(d, true));
+        markDone(t, true);
+        return { finished: open.length, parents: settleParents(tasks, t) };
+    }
+
+    // Untick a task; parents above it reopen with it.
+    function reopenTask(tasks, t) {
+        markDone(t, false);
+        return settleParents(tasks, t);
+    }
+
+    // Removing a task moves its smaller tasks up to its own parent.
+    function removeTask(plan, t) {
+        plan.tasks.forEach((x) => { if (x.parentId === t.id) x.parentId = t.parentId || ''; });
+        plan.tasks = plan.tasks.filter((x) => x.id !== t.id);
+        return settleParents(plan.tasks, t); // t still names its old parent
+    }
+
+    // "Part of …" and "2/5 smaller tasks" for a task's row.
+    function familyText(tasks, t) {
+        const parent = parentOf(tasks, t);
+        const { done, total } = taskProgress(tasks, t);
+        return [
+            parent ? `Part of ${parent.title}` : '',
+            total ? `${done}/${total} smaller task${total === 1 ? '' : 's'} done` : '',
+        ].filter(Boolean).join(' · ');
+    }
+
     // A tickable Plan task for a calendar event. `overrides` carries what you
     // chose in the scheduling dialog; without it the event's own time is used.
     function taskFromEvent(e, overrides = {}) {
@@ -376,7 +470,8 @@
                 key: `task:${t.id}`, kind: 'task', title: t.title, due: when.date, time: when.time, task: t,
                 // Past its deadline counts as overdue, whenever it's scheduled.
                 late: Boolean(t.due && t.due < today),
-                priority: t.priority || 'medium', context: t.source?.calendarName ? `Task · from ${t.source.calendarName}` : 'Task',
+                priority: t.priority || 'medium',
+                context: [t.source?.calendarName ? `Task · from ${t.source.calendarName}` : 'Task', familyText(plan.tasks, t)].filter(Boolean).join(' · '),
                 href: 'pages/plan.html', refId: t.id, tags: t.tags || [],
             });
         });
@@ -566,8 +661,8 @@
             await plan.load();
             const t = plan.doc.tasks.find((x) => x.id === item.refId);
             if (!t) return false;
-            t.done = true;
-            t.doneAt = new Date().toISOString();
+            const { parents } = finishTask(plan.doc.tasks, t);
+            parents.forEach((p) => A.toast(`All parts done: ${p.title}`, 'ok'));
             plan.save(true);
             return true;
         }
@@ -619,6 +714,13 @@
 
         if (COMPLETABLE.has(item.kind)) {
             r.appendChild(A.checkbox(false, async () => {
+                // Finishing a bigger task ticks its open smaller tasks too.
+                const open = item.kind === 'task' ? descendantsOf(A.store.plan.doc?.tasks, item.refId).filter((d) => !d.done).length : 0;
+                if (open && !(await A.confirm({
+                    title: `Finish "${item.title}"?`,
+                    description: `${open} smaller task${open === 1 ? ' is' : 's are'} still open and will be ticked off with it.`,
+                    confirmLabel: 'Finish all',
+                }))) return;
                 r.classList.add('is-done');
                 r.querySelector('.check')?.classList.add('on');
                 try {
@@ -668,5 +770,5 @@
         return r;
     }
 
-    A.items = { KIND_LABEL, BUCKETS, milestones, reachedMilestones, settleMilestone, settleMilestones, phasesEnding, subtaskProgress, subtaskEditor, collect, group, top, fetchEvents, complete, setTags, taskWhen, taskChips, completeStep, reopenStep, row, review, reviewQueue, taskFromEvent, linkTask, syncAccepted };
+    A.items = { KIND_LABEL, BUCKETS, milestones, reachedMilestones, settleMilestone, settleMilestones, phasesEnding, subtaskProgress, subtaskEditor, collect, group, top, fetchEvents, complete, setTags, taskWhen, taskChips, childrenOf, parentOf, taskProgress, descendantsOf, parentChoices, settleParents, settleAllParents, finishTask, reopenTask, removeTask, familyText, completeStep, reopenStep, row, review, reviewQueue, taskFromEvent, linkTask, syncAccepted };
 })();

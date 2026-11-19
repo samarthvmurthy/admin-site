@@ -530,7 +530,7 @@
         ]);
 
         state.plan = plan || { tasks: [], roadmaps: [] };
-        if (plan && A.items.settleMilestones(plan)) A.store.plan.save(true);
+        if (plan && (A.items.settleMilestones(plan) | A.items.settleAllParents(plan.tasks))) A.store.plan.save(true);
         state.custom = custom;
         Object.entries(workspaces).forEach(([id, ws]) => { state.workspaces[id] = A.store.workspace(id).seed(ws); });
         state.calendar = { configured: cal.configured };
