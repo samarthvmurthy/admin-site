@@ -140,7 +140,7 @@
 
     // The chips for a task's row: when you'll do it, then when it's due.
     function taskChips(t, done) {
-        return [workChip(t, done), deadlineChip(t, done)].filter(Boolean);
+        return [done ? null : repeatChip(t), workChip(t, done), deadlineChip(t, done)].filter(Boolean);
     }
 
     // ------------------------------------------------------- task family --
@@ -205,19 +205,147 @@
         return changed;
     }
 
-    // Tick a task (and everything under it). Returns { finished, parents }:
-    // how many smaller tasks were ticked with it, and parents that finished.
+    // ----------------------------------------------------------- repeats --
+    //
+    // A repeating task carries `repeat`:
+    //   { every: n, unit: day|week|month|year, days?: [0–6] (weekly, Sun = 0),
+    //     from: 'due' (on a fixed schedule) | 'done' (n after you finish it),
+    //     until?: 'YYYY-MM-DD', monthDay?: 1–31 }
+    // Ticking it off keeps it in Completed and adds the next one, with its
+    // due date and set-aside day moved along together (and fresh copies of
+    // its smaller tasks). Unticking it takes that next one back, as long as
+    // you haven't started on it.
+
+    const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const UNIT_WORD = { day: 'day', week: 'week', month: 'month', year: 'year' };
+
+    const dayOfMonth = (key) => Number(key.slice(8, 10));
+
+    // `key` moved by `n` months, on `day` of the month (or its last day).
+    function addMonths(key, n, day) {
+        const d = A.parseDate(key);
+        const first = new Date(d.getFullYear(), d.getMonth() + n, 1);
+        const last = new Date(first.getFullYear(), first.getMonth() + 1, 0).getDate();
+        first.setDate(Math.min(day || d.getDate(), last));
+        return A.dateKey(first);
+    }
+
+    function stepRepeat(rep, key, fixed) {
+        const every = Math.max(1, Number(rep.every) || 1);
+        if (rep.unit === 'week' && rep.days?.length) {
+            // The next listed weekday, in every n-th week counted from `key`'s.
+            const week0 = A.startOfWeekKey(key);
+            for (let i = 1; i <= 7 * every + 7; i++) {
+                const d = A.addDays(key, i);
+                const weekNo = Math.floor(A.daysBetween(week0, d) / 7);
+                if (weekNo % every === 0 && rep.days.includes(A.parseDate(d).getDay())) return d;
+            }
+            return A.addDays(key, 7 * every);
+        }
+        if (rep.unit === 'week') return A.addDays(key, 7 * every);
+        if (rep.unit === 'month') return addMonths(key, every, fixed ? rep.monthDay : 0);
+        if (rep.unit === 'year') return addMonths(key, 12 * every, fixed ? rep.monthDay : 0);
+        return A.addDays(key, every);
+    }
+
+    // The date a repeating task's next one lands on: after today, or null
+    // once it's past its end date.
+    function nextRepeatDate(t, today = A.todayKey()) {
+        const rep = t.repeat;
+        const anchor = t.due || t.workDate;
+        if (!rep || !anchor) return null;
+        const fixed = rep.from !== 'done';
+        let next = stepRepeat(rep, fixed ? anchor : today, fixed);
+        // On a fixed schedule, skip the ones that slipped by unticked.
+        for (let guard = 0; next <= today && guard < 5000; guard++) next = stepRepeat(rep, next, fixed);
+        return rep.until && next > rep.until ? null : next;
+    }
+
+    function repeatLabel(rep) {
+        if (!rep) return '';
+        const every = Math.max(1, Number(rep.every) || 1);
+        const days = rep.unit === 'week' && rep.days?.length ? [...rep.days].sort((a, b) => ((a + 6) % 7) - ((b + 6) % 7)) : null;
+        let text;
+        if (days && every === 1 && days.join() === '1,2,3,4,5') text = 'Every weekday';
+        else if (every === 1) text = { day: 'Daily', week: 'Weekly', month: 'Monthly', year: 'Yearly' }[rep.unit] || 'Daily';
+        else text = `Every ${every} ${UNIT_WORD[rep.unit] || 'day'}s`;
+        if (days && text !== 'Every weekday') text += ` on ${days.map((d) => WEEKDAYS[d]).join(', ')}`;
+        if (rep.from === 'done') text += ' after done';
+        if (rep.until) text += ` until ${A.shortDate(rep.until)}`;
+        return text;
+    }
+
+    function repeatChip(t) {
+        if (!t.repeat) return null;
+        const chip = A.el('span', 'repeat-chip');
+        chip.appendChild(A.icon('repeat', 11));
+        const label = repeatLabel(t.repeat);
+        chip.title = label;
+        chip.setAttribute('aria-label', label);
+        return chip;
+    }
+
+    // Add the next one of a repeating task that's just been ticked off.
+    function spawnRepeat(tasks, t) {
+        if (!t.repeat || (t.repeatedTo && tasks.some((x) => x.id === t.repeatedTo))) return null;
+        const next = nextRepeatDate(t);
+        if (!next) return null;
+        const delta = A.daysBetween(t.due || t.workDate, next);
+        const now = new Date().toISOString();
+        const ids = new Map();
+        const copy = (x, parentId) => {
+            const c = { ...x, id: A.uid(), parentId, done: false, createdAt: now };
+            ['doneAt', 'calEventId', 'calHash', 'repeatedTo', 'source', 'noCalendar'].forEach((k) => delete c[k]);
+            if (c.due) c.due = A.addDays(c.due, delta);
+            if (c.workDate) c.workDate = A.addDays(c.workDate, delta);
+            ids.set(x.id, c.id);
+            return c;
+        };
+        // It stands on its own: a bigger task it was part of can still finish.
+        const head = copy(t, '');
+        const below = descendantsOf(tasks, t.id);
+        const kids = below.map((d) => copy(d, ''));
+        kids.forEach((k, i) => { k.parentId = ids.get(below[i].parentId) || head.id; });
+        const at = tasks.indexOf(t);
+        tasks.splice(at === -1 ? 0 : at, 0, head, ...kids);
+        t.repeatedTo = head.id;
+        return head;
+    }
+
+    // Take back the next one of a repeating task, if it's untouched.
+    function unspawnRepeat(tasks, t) {
+        const next = t.repeatedTo && tasks.find((x) => x.id === t.repeatedTo);
+        if (!next) { delete t.repeatedTo; return null; }
+        const below = descendantsOf(tasks, next.id);
+        // Already started on: keep it, and don't add another when re-ticked.
+        if (next.done || below.some((d) => d.done)) return null;
+        delete t.repeatedTo;
+        const gone = new Set([next.id, ...below.map((d) => d.id)]);
+        tasks.splice(0, tasks.length, ...tasks.filter((x) => !gone.has(x.id)));
+        return next;
+    }
+
+    // Tick a task (and everything under it). Returns { finished, parents, next }:
+    // how many smaller tasks were ticked with it, parents that finished, and
+    // the next one if it repeats.
     function finishTask(tasks, t) {
         const open = descendantsOf(tasks, t.id).filter((d) => !d.done);
         open.forEach((d) => markDone(d, true));
         markDone(t, true);
-        return { finished: open.length, parents: settleParents(tasks, t) };
+        const parents = settleParents(tasks, t);
+        return { finished: open.length, parents, next: spawnRepeat(tasks, t) };
     }
 
     // Untick a task; parents above it reopen with it.
     function reopenTask(tasks, t) {
         markDone(t, false);
+        unspawnRepeat(tasks, t);
         return settleParents(tasks, t);
+    }
+
+    // "Repeats · next one Tomorrow" after ticking off a repeating task.
+    function announceNext(next) {
+        if (next) A.toast(`Repeats · next one ${A.dueLabel(next.due || next.workDate)}`, 'ok');
     }
 
     // Removing a task moves its smaller tasks up to its own parent.
@@ -661,8 +789,9 @@
             await plan.load();
             const t = plan.doc.tasks.find((x) => x.id === item.refId);
             if (!t) return false;
-            const { parents } = finishTask(plan.doc.tasks, t);
+            const { parents, next } = finishTask(plan.doc.tasks, t);
             parents.forEach((p) => A.toast(`All parts done: ${p.title}`, 'ok'));
+            announceNext(next);
             plan.save(true);
             return true;
         }
@@ -770,5 +899,5 @@
         return r;
     }
 
-    A.items = { KIND_LABEL, BUCKETS, milestones, reachedMilestones, settleMilestone, settleMilestones, phasesEnding, subtaskProgress, subtaskEditor, collect, group, top, fetchEvents, complete, setTags, taskWhen, taskChips, childrenOf, parentOf, taskProgress, descendantsOf, parentChoices, settleParents, settleAllParents, finishTask, reopenTask, removeTask, familyText, completeStep, reopenStep, row, review, reviewQueue, taskFromEvent, linkTask, syncAccepted };
+    A.items = { KIND_LABEL, BUCKETS, milestones, reachedMilestones, settleMilestone, settleMilestones, phasesEnding, subtaskProgress, subtaskEditor, collect, group, top, fetchEvents, complete, setTags, taskWhen, taskChips, childrenOf, parentOf, taskProgress, descendantsOf, parentChoices, settleParents, settleAllParents, finishTask, reopenTask, removeTask, nextRepeatDate, repeatLabel, announceNext, WEEKDAYS, familyText, completeStep, reopenStep, row, review, reviewQueue, taskFromEvent, linkTask, syncAccepted };
 })();

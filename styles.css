@@ -1999,3 +1999,28 @@ input.tag-editor-new { width: 8rem; flex: 0 1 8rem; font-size: 0.78rem; padding:
 @media (max-width: 640px) {
     .parent-link { max-width: 9rem; }
 }
+
+/* =====================================================================
+   Repeating tasks
+   ===================================================================== */
+
+.repeat-chip {
+    display: inline-grid; place-items: center; width: 1.35rem; height: 1.35rem;
+    border-radius: 999px; color: var(--accent); background: var(--accent-soft); flex-shrink: 0;
+}
+.repeat-chip .inline-icon { display: inline-grid; }
+.repeat-editor { display: flex; flex-direction: column; gap: 0.45rem; }
+.repeat-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.45rem; }
+.repeat-row[hidden], .repeat-days[hidden], .repeat-editor .modal-hint[hidden] { display: none; }
+.repeat-row > select { flex: 1 1 11rem; width: auto; }
+.repeat-word { font-size: 0.84rem; color: var(--text-dim); white-space: nowrap; }
+.repeat-row input.repeat-every { width: 4.5rem; flex: 0 0 auto; }
+.repeat-until { display: flex; align-items: center; gap: 0.45rem; flex: 1 1 11rem; margin: 0; }
+.repeat-until input { flex: 1; min-width: 0; }
+.repeat-days { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+.repeat-day {
+    font: inherit; font-size: 0.78rem; font-weight: 600; min-width: 2.2rem; padding: 0.3rem 0.4rem;
+    border-radius: 999px; border: 1px solid var(--border); background: var(--bg); color: var(--text-dim); cursor: pointer;
+}
+.repeat-day:hover { color: var(--text); }
+.repeat-day.on { background: var(--accent); border-color: var(--accent); color: #fff; }

@@ -194,6 +194,119 @@
         }];
     }
 
+    // "Repeat": a preset, or every n days/weeks/months/years (on chosen
+    // weekdays), counted from the due date or from when you finish, with an
+    // optional end date. value() → the task's `repeat`, or null.
+    const PRESETS = [
+        { value: '', label: "Doesn't repeat" },
+        { value: 'daily', label: 'Every day', rep: { every: 1, unit: 'day' } },
+        { value: 'weekdays', label: 'Every weekday (Mon–Fri)', rep: { every: 1, unit: 'week', days: [1, 2, 3, 4, 5] } },
+        { value: 'weekly', label: 'Every week', rep: { every: 1, unit: 'week' } },
+        { value: 'monthly', label: 'Every month', rep: { every: 1, unit: 'month' } },
+        { value: 'yearly', label: 'Every year', rep: { every: 1, unit: 'year' } },
+        { value: 'custom', label: 'Custom…' },
+    ];
+    const UNITS = [['day', 'days'], ['week', 'weeks'], ['month', 'months'], ['year', 'years']];
+    const WEEK_ORDER = [1, 2, 3, 4, 5, 6, 0];
+
+    function presetOf(rep) {
+        if (!rep) return '';
+        const days = (rep.days || []).join();
+        const hit = PRESETS.find((p) => p.rep && p.rep.unit === rep.unit && Number(rep.every || 1) === 1 && (p.rep.days || []).join() === days);
+        return hit ? hit.value : 'custom';
+    }
+
+    function repeatControl(t) {
+        const rep = t.repeat || null;
+        let days = [...(rep?.days || [])];
+        const node = A.el('div', 'repeat-editor');
+
+        const preset = A.el('select', 'select-plain');
+        preset.setAttribute('aria-label', 'Repeat');
+        PRESETS.forEach((p) => { const o = A.el('option', null, p.label); o.value = p.value; preset.appendChild(o); });
+        preset.value = presetOf(rep);
+
+        const custom = A.el('div', 'repeat-row');
+        custom.appendChild(A.el('span', 'repeat-word', 'Every'));
+        const every = A.el('input', 'repeat-every');
+        every.type = 'number';
+        every.min = '1';
+        every.max = '365';
+        every.value = String(rep?.every || 1);
+        every.setAttribute('aria-label', 'Repeat every');
+        const unit = A.el('select', 'select-plain');
+        unit.setAttribute('aria-label', 'Repeat unit');
+        UNITS.forEach(([v, l]) => { const o = A.el('option', null, l); o.value = v; unit.appendChild(o); });
+        unit.value = rep?.unit || 'week';
+        custom.appendChild(every);
+        custom.appendChild(unit);
+
+        const weekdays = A.el('div', 'repeat-days');
+        weekdays.setAttribute('role', 'group');
+        weekdays.setAttribute('aria-label', 'On these days');
+        WEEK_ORDER.forEach((d) => {
+            const b = A.button(A.items.WEEKDAYS[d].slice(0, 2), 'repeat-day', () => {
+                days = days.includes(d) ? days.filter((x) => x !== d) : [...days, d];
+                paint();
+            });
+            b.dataset.day = String(d);
+            b.title = A.items.WEEKDAYS[d];
+            weekdays.appendChild(b);
+        });
+
+        const extra = A.el('div', 'repeat-row');
+        const from = A.el('select', 'select-plain');
+        from.setAttribute('aria-label', 'Count the next one from');
+        [['due', 'On a fixed schedule'], ['done', 'Counted from when I finish it']].forEach(([v, l]) => { const o = A.el('option', null, l); o.value = v; from.appendChild(o); });
+        from.value = rep?.from === 'done' ? 'done' : 'due';
+        const untilLabel = A.el('label', 'repeat-until');
+        untilLabel.appendChild(A.el('span', 'repeat-word', 'Ends'));
+        const until = A.el('input');
+        until.type = 'date';
+        until.value = rep?.until || '';
+        until.setAttribute('aria-label', 'Stop repeating after');
+        until.title = 'Optional: no more after this date';
+        untilLabel.appendChild(until);
+        extra.appendChild(from);
+        extra.appendChild(untilLabel);
+
+        const summary = A.el('div', 'modal-hint');
+
+        function read() {
+            const p = PRESETS.find((x) => x.value === preset.value);
+            if (!p?.value) return null;
+            const base = p.rep ? { ...p.rep, days: p.rep.days ? [...p.rep.days] : undefined } : {
+                every: Math.max(1, Math.min(365, Math.round(Number(every.value)) || 1)),
+                unit: unit.value,
+                days: unit.value === 'week' && days.length ? WEEK_ORDER.filter((d) => days.includes(d)) : undefined,
+            };
+            if (!base.days) delete base.days;
+            base.from = from.value;
+            if (until.value) base.until = until.value;
+            return base;
+        }
+
+        function paint() {
+            const on = Boolean(preset.value);
+            custom.hidden = preset.value !== 'custom';
+            weekdays.hidden = preset.value !== 'custom' || unit.value !== 'week';
+            weekdays.querySelectorAll('.repeat-day').forEach((b) => {
+                const pressed = days.includes(Number(b.dataset.day));
+                b.classList.toggle('on', pressed);
+                b.setAttribute('aria-pressed', String(pressed));
+            });
+            extra.hidden = !on;
+            const r = read();
+            summary.textContent = r ? `${A.items.repeatLabel(r)}. Ticking one off adds the next.` : '';
+            summary.hidden = !r;
+        }
+        [preset, every, unit, from, until].forEach((n) => { n.addEventListener('input', paint); n.addEventListener('change', paint); });
+
+        [preset, custom, weekdays, extra, summary].forEach((n) => node.appendChild(n));
+        paint();
+        return { node, value: read };
+    }
+
     const LENGTH_DEFAULT = 60;
     const nearestLength = (m) => LENGTHS.reduce((best, x) => (Math.abs(x - m) < Math.abs(best - m) ? x : best), LENGTH_DEFAULT);
 
@@ -201,8 +314,8 @@
      * taskDialog({ task, title, description, submitLabel, events, workspaces,
      *              exclude, onSave(values), onDelete })
      * `events` may be a promise; the day's schedule fills in when it arrives.
-     * onSave gets { title, parentId, due, dueTime, priority, tags, workDate,
-     * workTime, duration, notes }.
+     * onSave gets { title, parentId, due, dueTime, priority, repeat, tags,
+     * workDate, workTime, duration, notes }; `repeat` is null when it doesn't.
      */
     function taskDialog(spec) {
         const t = spec.task || {};
@@ -218,6 +331,7 @@
                 { name: 'due', label: 'Due date', type: 'date', value: t.due || '', half: true },
                 { name: 'dueTime', label: 'Due time (optional)', type: 'time', value: t.dueTime || '', half: true },
                 { name: 'priority', label: 'Priority', type: 'select', value: t.priority || 'medium', half: true, options: A.PRIORITIES },
+                { name: 'repeat', label: 'Repeat', type: 'custom', render: () => repeatControl(t) },
                 { name: 'tags', label: 'Tags', type: 'custom', render: () => A.tags.editor(t.tags || []) },
                 { type: 'static', value: 'Time to work on it — optional. This is what goes on your calendar, separate from the due date.' },
                 { name: 'workDate', label: 'Day', type: 'date', value: t.workDate || '', half: true },
@@ -231,7 +345,15 @@
             onSubmit: (v) => {
                 if (v.dueTime && !v.due) throw new Error('Pick a due date to go with that due time.');
                 if (v.workTime && !v.workDate) throw new Error('Pick a day to go with that start time.');
-                spec.onSave({ ...v, duration: Number(v.duration) || LENGTH_DEFAULT });
+                if (v.repeat) {
+                    const anchor = v.due || v.workDate;
+                    if (!anchor) throw new Error('Give a repeating task a due date (or a day to work on it), so the next one knows when to land.');
+                    if (v.repeat.unit === 'week' && v.repeat.days && !v.repeat.days.length) delete v.repeat.days;
+                    if (v.repeat.until && v.repeat.until < anchor) throw new Error('Its end date is before the first one.');
+                    // Monthly and yearly repeats keep to this day of the month.
+                    if (['month', 'year'].includes(v.repeat.unit)) v.repeat.monthDay = Number(anchor.slice(8, 10));
+                }
+                spec.onSave({ ...v, repeat: v.repeat || null, duration: Number(v.duration) || LENGTH_DEFAULT });
             },
         });
 
@@ -286,6 +408,7 @@
             events, workspaces, exclude: event,
             onSave: (v) => {
                 const task = { ...draft, ...v };
+                if (!task.repeat) delete task.repeat;
                 A.store.plan.doc.tasks.push(task);
                 A.items.settleParents(A.store.plan.doc.tasks, task); // an open part reopens its bigger task
                 A.items.linkTask(A.store.review.doc, event, task.id);

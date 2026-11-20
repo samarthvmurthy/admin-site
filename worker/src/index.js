@@ -293,6 +293,32 @@ function upgradeTask(t) {
   return out;
 }
 
+// A repeating task: { every, unit: day|week|month|year, days?: [0–6],
+// from: due|done, until?, monthDay? }. Ticking one off in the page adds the
+// next; anything malformed is dropped so the task just stops repeating.
+const REPEAT_UNITS = ['day', 'week', 'month', 'year'];
+function cleanRepeat(t) {
+  if (!t || typeof t !== 'object' || !('repeat' in t)) return t;
+  const { repeat: r, ...rest } = t;
+  if (!r || typeof r !== 'object' || !REPEAT_UNITS.includes(r.unit)) return rest;
+  const out = { every: Math.min(365, Math.max(1, Math.round(Number(r.every)) || 1)), unit: r.unit, from: r.from === 'done' ? 'done' : 'due' };
+  if (r.unit === 'week' && Array.isArray(r.days)) {
+    const days = [...new Set(r.days.map(Number).filter((d) => Number.isInteger(d) && d >= 0 && d <= 6))];
+    if (days.length) out.days = days;
+  }
+  if (isDateKey(r.until)) out.until = r.until;
+  const md = Math.round(Number(r.monthDay));
+  if ((r.unit === 'month' || r.unit === 'year') && md >= 1 && md <= 31) out.monthDay = md;
+  return { ...rest, repeat: out };
+}
+
+function repeatText(r) {
+  if (!r) return '';
+  const unit = r.every === 1 ? r.unit : `${r.every} ${r.unit}s`;
+  const days = r.days ? ` on ${r.days.map((d) => ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d]).join(', ')}` : '';
+  return `Repeats every ${unit}${days}${r.from === 'done' ? ', counted from when it is done' : ''}${r.until ? ` until ${r.until}` : ''}`;
+}
+
 // A task can be part of a bigger one (parentId). Links to a missing task or
 // that loop back on themselves are dropped, and a task with smaller tasks is
 // done exactly when they all are, so its calendar tick always agrees.
@@ -332,7 +358,7 @@ function settleTaskFamilies(tasks) {
 
 function normalizePlan(body) {
   return {
-    tasks: settleTaskFamilies(arr(body.tasks).filter(withId).map(upgradeTask)),
+    tasks: settleTaskFamilies(arr(body.tasks).filter(withId).map(upgradeTask).map(cleanRepeat)),
     roadmaps: arr(body.roadmaps).filter(withId).map((r) => ({
       ...r,
       phases: arr(r.phases).filter(withId).map((p) => ({ ...p, items: arr(p.items).filter(withId).map(settleMilestone) })),
@@ -819,6 +845,7 @@ function taskSpec(task, timeZone) {
   const description = (extra) => [
     extra,
     t.priority ? `Priority: ${t.priority}` : '',
+    t.done ? '' : repeatText(t.repeat),
     t.notes || '',
     `Open in Plan: ${SITE_URL}/pages/plan.html`,
   ].filter(Boolean).join('\n\n');

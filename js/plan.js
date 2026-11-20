@@ -111,6 +111,7 @@
             onSave: (v) => {
                 const target = task || { id: A.uid(), done: false, createdAt: new Date().toISOString() };
                 Object.assign(target, v);
+                if (!target.repeat) delete target.repeat;
                 if (!editing) plan().tasks.unshift(target);
                 // Its old and new bigger tasks may finish or reopen.
                 const tasks = plan().tasks;
@@ -142,7 +143,9 @@
                 description: `${open} smaller task${open === 1 ? ' is' : 's are'} still open and will be ticked off with it.`,
                 confirmLabel: 'Finish all',
             }))) { render(); return; }
-            announce(A.items.finishTask(tasks, task).parents);
+            const { parents, next } = A.items.finishTask(tasks, task);
+            announce(parents);
+            A.items.announceNext(next);
         } else {
             // A bigger task follows its smaller ones, so reopen one of those.
             if (A.items.childrenOf(tasks, task.id).length) {
